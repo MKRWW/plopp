@@ -1,7 +1,7 @@
 /**
  * Spieler-Entität mit Position, Richtung und Bewegung.
  */
-import { slideAlongAxis, PLAYER_RADIUS, slideAroundEntity } from '../engine/collision';
+import { slideAlongAxis, PLAYER_RADIUS } from '../engine/collision';
 
 export class Player {
   public x: number;
@@ -24,16 +24,12 @@ export class Player {
   constructor(startX: number, startY: number) {
     this.x = startX;
     this.y = startY;
-    this.dirX = 1.0; // Blickrichtung nach rechts
+    this.dirX = 1.0;
     this.dirY = 0.0;
-    this.planeX = 0.0; // Kameraebene (senkrecht zur Blickrichtung)
-    this.planeY = 0.66; // FOV = 66° (0.66 = tan(33°))
+    this.planeX = 0.0;
+    this.planeY = 0.66;
   }
 
-  /**
-   * Rotiert den Spieler um den gegebenen Winkel (in Radiant).
-   * Positiv = nach rechts, negativ = nach links.
-   */
   public rotate(angle: number): void {
     const oldDirX = this.dirX;
     this.dirX = this.dirX * Math.cos(angle) - this.dirY * Math.sin(angle);
@@ -44,79 +40,66 @@ export class Player {
   }
 
   /**
-   * Bewegt den Spieler in Blickrichtung mit Kollisionsprüfung (Sliding).
-   * @param distance Positive = vorwärts, negative = rückwärts.
-   * @param enemies Optional: Liste von Gegnern zum Um-Sliden.
+   * Bewegt den Spieler in Blickrichtung mit Wand- und Entity-Kollision.
+   * Sliding-Verhalten: Bei Blockade auf einer Achse bleibt die andere Achse frei.
    */
   public move(distance: number, enemies?: Array<{ x: number, y: number, radius: number }>): void {
     const deltaX = this.dirX * distance;
     const deltaY = this.dirY * distance;
-
-    // Achsenseparat prüfen: erst X, dann Y (Sliding)
-    this.x = slideAlongAxis(this.x, deltaX, this.y, this.radius);
-    this.y = slideAlongAxis(this.y, deltaY, this.x, this.radius);
-
-    // Entity collision: slide around enemies
-    if (enemies) {
-      this.slideAroundObstacles(this.x, this.y, deltaX, deltaY, enemies);
-    }
+    this.applyMove(deltaX, deltaY, enemies);
   }
 
   /**
-   * Seitliches Gleiten (Strafe) mit Kollisionsprüfung.
-   * @param distance Positive = rechts, negative = links.
-   * @param enemies Optional: Liste von Gegnern zum Um-Sliden.
+   * Seitliches Gleiten (Strafe) mit Wand- und Entity-Kollision.
    */
   public strafe(distance: number, enemies?: Array<{ x: number, y: number, radius: number }>): void {
-    // Senkrecht zur Blickrichtung
     const strafeX = -this.dirY * distance;
     const strafeY = this.dirX * distance;
-
-    // Achsenseparat prüfen
-    this.x = slideAlongAxis(this.x, strafeX, this.y, this.radius);
-    this.y = slideAlongAxis(this.y, strafeY, this.x, this.radius);
-
-    // Entity collision: slide around enemies
-    if (enemies) {
-      this.slideAroundObstacles(this.x, this.y, strafeX, strafeY, enemies);
-    }
+    this.applyMove(strafeX, strafeY, enemies);
   }
 
   /**
-   * After wall sliding, resolve any remaining entity overlap by sliding
-   * along the tangent of the obstacle. This allows the player to move
-   * *around* an enemy rather than being completely blocked.
+   * Wendet eine Bewegung achsenseparat an: erst X, dann Y.
+   * Pro Achse: Wand-Sliding via slideAlongAxis. Wenn die resultierende
+   * Position einen Gegner überlappt, wird diese Achsenbewegung verworfen
+   * (Player kann an Gegnern vorbeisliden, wenn die andere Achse frei ist).
    */
-  private slideAroundObstacles(
-    baseX: number, baseY: number,
-    moveX: number, moveY: number,
-    obstacles: Array<{ x: number, y: number, radius: number }>
+  private applyMove(
+    deltaX: number,
+    deltaY: number,
+    enemies?: Array<{ x: number, y: number, radius: number }>
   ): void {
-    // Try the full move first
-    let tryX = baseX + moveX;
-    let tryY = baseY + moveY;
-
-    for (const obs of obstacles) {
-      const result = slideAroundEntity(baseX, baseY, tryX, tryY, this.radius, obs);
-      tryX = result.x;
-      tryY = result.y;
+    let newX = slideAlongAxis(this.x, deltaX, this.y, this.radius);
+    if (enemies && this.overlapsAnyEnemy(newX, this.y, enemies)) {
+      newX = this.x;
     }
-
-    this.x = tryX;
-    this.y = tryY;
+    let newY = slideAlongAxis(this.y, deltaY, newX, this.radius);
+    if (enemies && this.overlapsAnyEnemy(newX, newY, enemies)) {
+      newY = this.y;
+    }
+    this.x = newX;
+    this.y = newY;
   }
 
-  /**
-   * Position direkt setzen (z.B. nach Kollisionsprüfung oder Respawn).
-   */
+  private overlapsAnyEnemy(
+    px: number,
+    py: number,
+    enemies: Array<{ x: number, y: number, radius: number }>
+  ): boolean {
+    for (const e of enemies) {
+      const dx = px - e.x;
+      const dy = py - e.y;
+      const minDist = this.radius + e.radius;
+      if (dx * dx + dy * dy < minDist * minDist) return true;
+    }
+    return false;
+  }
+
   public setPosition(x: number, y: number): void {
     this.x = x;
     this.y = y;
   }
 
-  /**
-   * Gibt den Kollisionsradius zurück.
-   */
   public getRadius(): number {
     return this.radius;
   }

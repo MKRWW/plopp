@@ -154,45 +154,10 @@ export function wouldOverlapEntity(
 }
 
 /**
- * Slide a proposed move around an entity obstacle.
- * If the direct move would overlap, project the movement onto the tangent
- * around the obstacle so the mover can still "slide past" it.
- * Returns { x, y } — the safe new position.
- */
-export function slideAroundEntity(
-  fromX: number, fromY: number,
-  toX: number, toY: number,
-  moverRadius: number,
-  obstacle: { x: number, y: number, radius: number }
-): { x: number, y: number } {
-  const minDist = moverRadius + obstacle.radius;
-  const dx = toX - obstacle.x;
-  const dy = toY - obstacle.y;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-
-  if (dist >= minDist) {
-    // No overlap — move is safe
-    return { x: toX, y: toY };
-  }
-
-  if (dist < 0.001) {
-    // Directly on top — push to minDist along +X
-    return { x: obstacle.x + minDist, y: obstacle.y };
-  }
-
-  // Project onto the circle boundary at minDist
-  const nx = dx / dist;
-  const ny = dy / dist;
-  return {
-    x: obstacle.x + nx * minDist,
-    y: obstacle.y + ny * minDist
-  };
-}
-
-/**
  * Resolve all pairwise entity overlaps in a list of entities.
  * Each entity is pushed proportional to its inverse weight (higher weight = pushed less).
- * This is the "penetration resolution pass" run after all moves.
+ * Pushes are wall-clamped: if a target position would land in a wall, that
+ * entity stays put and the other side absorbs the full push (also wall-clamped).
  */
 export function resolveAllEntityOverlaps(
   entities: { x: number, y: number, radius: number, weight: number }[]
@@ -206,15 +171,40 @@ export function resolveAllEntityOverlaps(
 
       if (push.dx === 0 && push.dy === 0) continue;
 
-      // Split push proportional to inverse weight
       const totalWeight = a.weight + b.weight;
-      const aFactor = b.weight / totalWeight; // a moves more if b is heavier
-      const bFactor = a.weight / totalWeight; // b moves more if a is heavier
+      let aFactor = b.weight / totalWeight;
+      let bFactor = a.weight / totalWeight;
 
-      a.x += push.dx * aFactor;
-      a.y += push.dy * aFactor;
-      b.x -= push.dx * bFactor;
-      b.y -= push.dy * bFactor;
+      const aTargetX = a.x + push.dx * aFactor;
+      const aTargetY = a.y + push.dy * aFactor;
+      const bTargetX = b.x - push.dx * bFactor;
+      const bTargetY = b.y - push.dy * bFactor;
+
+      const aBlocked = positionCollides(aTargetX, aTargetY, a.radius);
+      const bBlocked = positionCollides(bTargetX, bTargetY, b.radius);
+
+      if (!aBlocked && !bBlocked) {
+        a.x = aTargetX; a.y = aTargetY;
+        b.x = bTargetX; b.y = bTargetY;
+      } else if (aBlocked && !bBlocked) {
+        // a can't move — try to push b alone with the full overlap
+        const fullBX = b.x - push.dx;
+        const fullBY = b.y - push.dy;
+        if (!positionCollides(fullBX, fullBY, b.radius)) {
+          b.x = fullBX; b.y = fullBY;
+        } else {
+          b.x = bTargetX; b.y = bTargetY;
+        }
+      } else if (!aBlocked && bBlocked) {
+        const fullAX = a.x + push.dx;
+        const fullAY = a.y + push.dy;
+        if (!positionCollides(fullAX, fullAY, a.radius)) {
+          a.x = fullAX; a.y = fullAY;
+        } else {
+          a.x = aTargetX; a.y = aTargetY;
+        }
+      }
+      // both blocked → leave both in place; engine will resolve next frame
     }
   }
 }
