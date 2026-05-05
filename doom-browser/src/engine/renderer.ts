@@ -345,7 +345,9 @@ export class Renderer {
   }
 
   /**
-   * Prüft ob der Spieler nah genug an einem Item-Sprite ist zum Einsammeln.
+   * Prüft ob der Spieler nah genug an einem collectable Sprite ist zum Einsammeln.
+   * Nur AMMO, HEALTH und KEYCARD sind einsammelbar. Deko (BARREL, TERMINAL, LAMP, DEBRIS)
+   * wird ignoriert.
    */
   private checkItemPickup(): void {
     const pickupRadius = 0.5;
@@ -354,7 +356,7 @@ export class Renderer {
 
     for (let i = this.sprites.length - 1; i >= 0; i--) {
       const sprite = this.sprites[i];
-      if (sprite.type === SpriteType.ENEMY) continue;
+      if (!sprite.isCollectable) continue;
 
       const dx = sprite.x - px;
       const dy = sprite.y - py;
@@ -1437,10 +1439,10 @@ export class Renderer {
       ctx.fillText('⚡ SPRINT', w / 2, h - 60);
     }
 
-    // --- Item-Pickup-Hinweis (wenn Item in der Nähe) ---
+    // --- Item-Pickup-Hinweis (nur für collectable Items) ---
     const pickupRadius = 0.5;
     for (const sprite of this.sprites) {
-      if (sprite.type === SpriteType.ENEMY) continue;
+      if (!sprite.isCollectable) continue;
       const dx = sprite.x - this.player.x;
       const dy = sprite.y - this.player.y;
       const dist = Math.sqrt(dx * dx + dy * dy);

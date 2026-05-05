@@ -5,7 +5,7 @@
 
 import { Player } from '../player/player';
 import { WORLD_MAP, MAP_WIDTH, MAP_HEIGHT, worldState, TILE } from '../engine/world';
-import { Sprite, SpriteType } from '../engine/sprite';
+import { Sprite, SpriteType, isCollectableSprite } from '../engine/sprite';
 import { positionCollides, PLAYER_RADIUS, ENEMY_RADIUS } from '../engine/collision';
 
 /**
@@ -72,17 +72,24 @@ export class Minimap {
 
   private renderNormal(player: Player, sprites: Sprite[]): void {
     const ctx = this.ctx;
+    const reachable = this.computeReachableTiles(player);
 
     ctx.clearRect(0, 0, DEBUG_SIZE, DEBUG_SIZE);
     ctx.fillStyle = COLORS.background;
     ctx.fillRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
 
-    this.renderMap(ctx, TILE_SIZE);
+    this.renderMap(ctx, TILE_SIZE, reachable);
 
     for (const sprite of sprites) {
       if (sprite.type === SpriteType.ENEMY) continue;
+      if (!isCollectableSprite(sprite.type)) continue;
+      if (!this.isReachableWorldPosition(sprite.x, sprite.y, reachable)) continue;
+      const color =
+        sprite.type === SpriteType.AMMO ? COLORS.ammo :
+        sprite.type === SpriteType.HEALTH ? COLORS.health :
+        '#5af';
       this.renderSpriteDot(ctx, sprite.x, sprite.y, TILE_SIZE,
-        sprite.type === SpriteType.AMMO ? COLORS.ammo : COLORS.health);
+        color);
     }
 
     for (const sprite of sprites) {
@@ -124,14 +131,18 @@ export class Minimap {
       ctx.stroke();
     }
 
-    // Items + Decor
+    // Collectable Items (farbig) + Deko (neutral grau)
     for (const sprite of sprites) {
       if (sprite.type === SpriteType.ENEMY) continue;
+      if (!isCollectableSprite(sprite.type)) {
+        // Deko-Sprites neutral grau
+        this.renderSpriteDot(ctx, sprite.x, sprite.y, tile, '#888');
+        continue;
+      }
       const color =
         sprite.type === SpriteType.AMMO ? COLORS.ammo :
         sprite.type === SpriteType.HEALTH ? COLORS.health :
-        sprite.type === SpriteType.KEYCARD ? '#5af' :
-        '#888';
+        '#5af';
       this.renderSpriteDot(ctx, sprite.x, sprite.y, tile, color);
     }
 
@@ -232,7 +243,11 @@ export class Minimap {
     return this.debugMode ? DEBUG_SIZE : MINIMAP_SIZE;
   }
 
-  private renderMap(ctx: CanvasRenderingContext2D, tileSize: number): void {
+  private renderMap(
+    ctx: CanvasRenderingContext2D,
+    tileSize: number,
+    reachable?: boolean[][]
+  ): void {
     for (let y = 0; y < MAP_HEIGHT; y++) {
       for (let x = 0; x < MAP_WIDTH; x++) {
         const base = WORLD_MAP[y][x];
@@ -242,7 +257,10 @@ export class Minimap {
         // Türzustände berücksichtigen
         if (base === TILE.BLUE_KEY_DOOR || base === TILE.SECRET_WALL) {
           const door = worldState.getDoor(x, y);
-          if (door?.state === 'open') {
+          if (base === TILE.SECRET_WALL && door?.state === 'closed') {
+            // Secret Walls tarnen sich auf der normalen Minimap als normale Wand.
+            ctx.fillStyle = COLORS.wall;
+          } else if (door?.state === 'open') {
             // Geöffnete Tür = Boden
             ctx.fillStyle = COLORS.floor;
           } else if (door?.state === 'opening') {
@@ -254,12 +272,61 @@ export class Minimap {
           }
         } else if (base > 0) {
           ctx.fillStyle = COLORS.wall;
+        } else if (reachable && !reachable[y][x]) {
+          // Versteckte, nicht erreichbare Bodenbereiche (z.B. Secret Room)
+          // nicht auf der normalen Minimap spoilern.
+          ctx.fillStyle = COLORS.wall;
         } else {
           ctx.fillStyle = COLORS.floor;
         }
         ctx.fillRect(px, py, tileSize, tileSize);
       }
     }
+  }
+
+  private computeReachableTiles(player: Player): boolean[][] {
+    const reachable = Array.from(
+      { length: MAP_HEIGHT },
+      () => Array<boolean>(MAP_WIDTH).fill(false)
+    );
+    const startX = Math.floor(player.x);
+    const startY = Math.floor(player.y);
+    if (startX < 0 || startX >= MAP_WIDTH || startY < 0 || startY >= MAP_HEIGHT) {
+      return reachable;
+    }
+    if (worldState.isSolidTile(startX, startY)) {
+      return reachable;
+    }
+
+    const queue: Array<{ x: number; y: number }> = [{ x: startX, y: startY }];
+    reachable[startY][startX] = true;
+
+    for (let i = 0; i < queue.length; i++) {
+      const current = queue[i];
+      const neighbors = [
+        { x: current.x + 1, y: current.y },
+        { x: current.x - 1, y: current.y },
+        { x: current.x, y: current.y + 1 },
+        { x: current.x, y: current.y - 1 },
+      ];
+
+      for (const next of neighbors) {
+        if (next.x < 0 || next.x >= MAP_WIDTH || next.y < 0 || next.y >= MAP_HEIGHT) continue;
+        if (reachable[next.y][next.x]) continue;
+        if (worldState.isSolidTile(next.x, next.y)) continue;
+        reachable[next.y][next.x] = true;
+        queue.push(next);
+      }
+    }
+
+    return reachable;
+  }
+
+  private isReachableWorldPosition(worldX: number, worldY: number, reachable: boolean[][]): boolean {
+    const tileX = Math.floor(worldX);
+    const tileY = Math.floor(worldY);
+    if (tileX < 0 || tileX >= MAP_WIDTH || tileY < 0 || tileY >= MAP_HEIGHT) return false;
+    return reachable[tileY][tileX];
   }
 
   private renderSpriteDot(

@@ -19,6 +19,18 @@ export enum SpriteType {
   DEBRIS = 'debris'
 }
 
+/**
+ * Returns true for sprites that the player can pick up (collectables).
+ * Deco sprites (BARREL, TERMINAL, LAMP, DEBRIS) and ENEMY return false.
+ */
+export function isCollectableSprite(type: SpriteType): boolean {
+  return (
+    type === SpriteType.AMMO ||
+    type === SpriteType.HEALTH ||
+    type === SpriteType.KEYCARD
+  );
+}
+
 export class Sprite {
   public x: number;
   public y: number;
@@ -56,6 +68,14 @@ export class Sprite {
     if (texture) {
       this.textures = [texture];
     }
+  }
+
+  /**
+   * Returns true if this sprite is a collectable item (AMMO, HEALTH, KEYCARD).
+   * Deco sprites (BARREL, TERMINAL, LAMP, DEBRIS) and ENEMY return false.
+   */
+  public get isCollectable(): boolean {
+    return isCollectableSprite(this.type);
   }
 
   public update(deltaTime: number): void {
