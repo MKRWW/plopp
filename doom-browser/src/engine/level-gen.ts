@@ -38,6 +38,8 @@ export interface Level {
   height: number;
   map: number[][];
   spawn: { x: number; y: number; dirX: number; dirY: number };
+  /** Entrance position: 1 tile INSIDE room 0 from a randomly chosen wall edge. */
+  entrance: Vec2;
   /** Center of the EXIT_DOOR wall tile — player checks distance to this. */
   exit: Vec2;
   keycard: Vec2;
@@ -150,6 +152,43 @@ function bfsReachable(map: number[][], start: Vec2, passableExtras: Set<number>)
     }
   }
   return reachable;
+}
+
+/**
+ * Pick an entrance position on room 0's perimeter: randomly choose a wall edge
+ * (top, bottom, left, or right), then return a position 1 tile INSIDE from that wall.
+ * This position becomes the "entrance" marker.
+ */
+function pickEntrancePosition(
+  room: Room,
+  rng: () => number
+): Vec2 {
+  const choice = Math.floor(rng() * 4); // 0=top, 1=bottom, 2=left, 3=right
+  
+  switch (choice) {
+    case 0: // Top wall: pick random x in [room.x, room.x + room.w), y = room.y + 1 (1 tile inside)
+      return {
+        x: room.x + Math.floor(rng() * room.w),
+        y: room.y + 1
+      };
+    case 1: // Bottom wall: pick random x in [room.x, room.x + room.w), y = room.y + room.h - 2 (1 tile inside)
+      return {
+        x: room.x + Math.floor(rng() * room.w),
+        y: room.y + room.h - 2
+      };
+    case 2: // Left wall: pick random y in [room.y, room.y + room.h), x = room.x + 1 (1 tile inside)
+      return {
+        x: room.x + 1,
+        y: room.y + Math.floor(rng() * room.h)
+      };
+    case 3: // Right wall: pick random y in [room.y, room.y + room.h), x = room.x + room.w - 2 (1 tile inside)
+      return {
+        x: room.x + room.w - 2,
+        y: room.y + Math.floor(rng() * room.h)
+      };
+    default:
+      return { x: room.x, y: room.y };
+  }
 }
 
 /**
@@ -368,6 +407,10 @@ export function generateLevel(seed: number, stage: number): Level {
     const spawnTile = roomCenter(spawnRoom);
     const spawn: Vec2 = { x: spawnTile.x, y: spawnTile.y };
 
+    // Entrance: pick a random wall edge of room 0, 1 tile inside
+    const entranceTile = pickEntrancePosition(spawnRoom, rng);
+    const entrance: Vec2 = { x: entranceTile.x, y: entranceTile.y };
+
     // Exit room = farthest from spawn (Manhattan).
     let exitIdx = -1, bestDist = -1;
     for (let i = 1; i < rooms.length; i++) {
@@ -465,6 +508,7 @@ export function generateLevel(seed: number, stage: number): Level {
       height: H,
       map,
       spawn: { x: spawn.x + 0.5, y: spawn.y + 0.5, dirX: facing.dirX, dirY: facing.dirY },
+      entrance: { x: entrance.x + 0.5, y: entrance.y + 0.5 },
       exit: { x: exitDoor.wall.x + 0.5, y: exitDoor.wall.y + 0.5 },
       keycard: { x: keycardTile.x + 0.5, y: keycardTile.y + 0.5 },
       enemies,
