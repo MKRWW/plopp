@@ -437,6 +437,12 @@ export class Renderer {
     keycard.animationSpeed = 0.12;
     this.sprites.push(keycard);
 
+    // --- Secret Room Bonus-Item (Health) ---
+    const secretHealth = new Sprite(4.5, 12.5, SpriteType.HEALTH, healthTextures?.[0] ?? null);
+    if (healthTextures) secretHealth.textures = healthTextures;
+    secretHealth.animationSpeed = 0.12;
+    this.sprites.push(secretHealth);
+
     // --- Dekor-Sprites ---
     const barrelTextures = flat.get(SpriteType.BARREL);
     const terminalTextures = flat.get(SpriteType.TERMINAL);

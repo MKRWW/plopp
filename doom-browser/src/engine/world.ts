@@ -22,8 +22,10 @@
 /** Basis-Map (statisch, unveränderlich).
  * Tile-Typen: 0=Boden, 1=Stein, 2=Metal, 3=Exit, 4=Blue Key Door, 5=Secret Wall
  * Layout:
- *   - Blue Key Door (4) bei (14,14) blockiert den Weg zum Exit (15,14)
- *   - Secret Wall (5) bei (12,10) verschliesst kleinen Bonusbereich bei (13,10)+(13,11)
+ *   - Blue Key Door (4) bei (13,14) blockiert den Weg zum Exit
+ *   - Exit Door (3) bei (14,14)
+ *   - Secret Wall (5) bei (3,11) verschließt 2x2 Secret Room bei (3,12)..(4,13)
+ *   - Bonus-Item (Health) bei (4.5,12.5) im Secret Room
  *   - Keycard bei (13.5,2.5) ist erreichbar vor der Blue Key Door
  */
 export const WORLD_MAP = [
@@ -37,11 +39,11 @@ export const WORLD_MAP = [
   [1, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 1],
   [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1],
   [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1],
-  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 5, 0, 0, 1],
   [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 3, 1],
+  [1, 0, 0, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+  [1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
+  [1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
+  [1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 4, 3, 1],
   [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
 ];
 
