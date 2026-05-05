@@ -96,56 +96,93 @@ export function positionCollides(
 }
 
 /**
- * Berechnet die sichere Bewegung auf einer einzelnen Achse mit Sliding.
- * 
- * Wenn die Zielposition kollidiert, wird die Bewegung schrittweise
- * reduziert, bis eine freie Position gefunden wird (oder die Bewegung
- * komplett blockiert ist).
- * 
- * @param currentPos Aktuelle Position auf der Achse (x oder y)
- * @param delta Gewünschte Bewegungsänderung
- * @param fixedPos Die andere Achse (fixiert während des Checks)
- * @param radius Kollisionsradius des Spielers
- * @returns Die sichere neue Position auf dieser Achse
+ * Berechnet die sichere X-Bewegung mit Sliding an Wänden.
+ * Prüft positionCollides(testX, y, radius).
+ *
+ * @param currentX Aktuelle X-Position
+ * @param deltaX Gewünschte X-Bewegung
+ * @param y Fixierte Y-Position während des Checks
+ * @param radius Kollisionsradius
+ * @returns Die sichere neue X-Position
  */
-export function slideAlongAxis(
-  currentPos: number,
-  delta: number,
-  fixedPos: number,
+export function slideAlongX(
+  currentX: number,
+  deltaX: number,
+  y: number,
   radius: number = PLAYER_RADIUS
 ): number {
-  const targetPos = currentPos + delta;
+  const targetX = currentX + deltaX;
 
-  // Falls kein Kollisionscheck nötig, sofort zurück
-  if (!positionCollides(targetPos, fixedPos, radius)) {
-    return targetPos;
+  if (!positionCollides(targetX, y, radius)) {
+    return targetX;
   }
 
-  // Sliding: Bewegung schrittweise reduzieren
-  // Schritt 1: Prüfe, ob gar keine Bewegung möglich
-  if (positionCollides(currentPos, fixedPos, radius)) {
-    // Spieler steckt fest (sollte nicht passieren), bleib an Ort
-    return currentPos;
+  if (positionCollides(currentX, y, radius)) {
+    return currentX;
   }
 
-  // Schritt 2: Binäre Suche nach der maximalen sicheren Bewegung
-  const direction = delta > 0 ? 1 : -1;
+  const direction = deltaX > 0 ? 1 : -1;
   let low = 0;
-  let high = Math.abs(delta);
-  const steps = 8; // Präzision: 2^8 = 256 Unterteilungen reicht
+  let high = Math.abs(deltaX);
+  const steps = 8;
 
   for (let i = 0; i < steps; i++) {
     const mid = (low + high) / 2;
-    const testPos = currentPos + direction * mid;
+    const testX = currentX + direction * mid;
 
-    if (positionCollides(testPos, fixedPos, radius)) {
-      high = mid; // Zu weit, reduzieren
+    if (positionCollides(testX, y, radius)) {
+      high = mid;
     } else {
-      low = mid; // OK, weiter testen
+      low = mid;
     }
   }
 
-  return currentPos + direction * low;
+  return currentX + direction * low;
+}
+
+/**
+ * Berechnet die sichere Y-Bewegung mit Sliding an Wänden.
+ * Prüft positionCollides(x, testY, radius).
+ *
+ * @param currentY Aktuelle Y-Position
+ * @param deltaY Gewünschte Y-Bewegung
+ * @param x Fixierte X-Position während des Checks
+ * @param radius Kollisionsradius
+ * @returns Die sichere neue Y-Position
+ */
+export function slideAlongY(
+  currentY: number,
+  deltaY: number,
+  x: number,
+  radius: number = PLAYER_RADIUS
+): number {
+  const targetY = currentY + deltaY;
+
+  if (!positionCollides(x, targetY, radius)) {
+    return targetY;
+  }
+
+  if (positionCollides(x, currentY, radius)) {
+    return currentY;
+  }
+
+  const direction = deltaY > 0 ? 1 : -1;
+  let low = 0;
+  let high = Math.abs(deltaY);
+  const steps = 8;
+
+  for (let i = 0; i < steps; i++) {
+    const mid = (low + high) / 2;
+    const testY = currentY + direction * mid;
+
+    if (positionCollides(x, testY, radius)) {
+      high = mid;
+    } else {
+      low = mid;
+    }
+  }
+
+  return currentY + direction * low;
 }
 
 /**

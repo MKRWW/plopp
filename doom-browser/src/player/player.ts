@@ -1,7 +1,7 @@
 /**
  * Spieler-Entität mit Position, Richtung und Bewegung.
  */
-import { slideAlongAxis, PLAYER_RADIUS } from '../engine/collision';
+import { slideAlongX, slideAlongY, PLAYER_RADIUS } from '../engine/collision';
 
 export class Player {
   public x: number;
@@ -60,7 +60,7 @@ export class Player {
 
   /**
    * Wendet eine Bewegung achsenseparat an: erst X, dann Y.
-   * Pro Achse: erst Wand-Sliding via slideAlongAxis. Anschließend wird die
+   * Pro Achse: erst Wand-Sliding via slideAlongX/slideAlongY. Anschließend wird die
    * Achse nur dann verworfen, wenn die Bewegung die Überlappung mit
    * einem Gegner STRENG verschlechtert (also den Abstand verkleinert).
    * Bewegung, die den Abstand vergrößert oder gleich lässt, ist erlaubt —
@@ -72,11 +72,11 @@ export class Player {
     deltaY: number,
     enemies?: Array<{ x: number, y: number, radius: number }>
   ): void {
-    let newX = slideAlongAxis(this.x, deltaX, this.y, this.radius);
+    let newX = slideAlongX(this.x, deltaX, this.y, this.radius);
     if (enemies && this.movementWorsensOverlap(this.x, this.y, newX, this.y, enemies)) {
       newX = this.x;
     }
-    let newY = slideAlongAxis(this.y, deltaY, newX, this.radius);
+    let newY = slideAlongY(this.y, deltaY, newX, this.radius);
     if (enemies && this.movementWorsensOverlap(newX, this.y, newX, newY, enemies)) {
       newY = this.y;
     }

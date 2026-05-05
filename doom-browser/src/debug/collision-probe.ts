@@ -15,7 +15,7 @@
  */
 
 import { WORLD_MAP, MAP_WIDTH, MAP_HEIGHT } from '../engine/world';
-import { positionCollides, PLAYER_RADIUS, slideAlongAxis } from '../engine/collision';
+import { positionCollides, PLAYER_RADIUS, slideAlongX, slideAlongY } from '../engine/collision';
 
 function isWallTile(x: number, y: number): boolean {
   if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) return true;
@@ -109,9 +109,9 @@ function main(): void {
       const mag = Math.hypot(dirX, dirY) || 1;
       const moveX = (dirX / mag) * stepLen;
       const moveY = (dirY / mag) * stepLen;
-      // Player.move emulation: axis-separate slideAlongAxis.
-      const newX = slideAlongAxis(px, moveX, py, PLAYER_RADIUS);
-      const newY = slideAlongAxis(py, moveY, newX, PLAYER_RADIUS);
+      // Player.move emulation: axis-separate slideAlongX/slideAlongY.
+      const newX = slideAlongX(px, moveX, py, PLAYER_RADIUS);
+      const newY = slideAlongY(py, moveY, newX, PLAYER_RADIUS);
       const totalMoved = Math.hypot(newX - px, newY - py);
       const ratio = totalMoved / stepLen;
       if (ratio < 0.1) {

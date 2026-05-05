@@ -6,7 +6,7 @@ import { TextureManager, Texture } from './textures';
 import { Sprite, SpriteType, generateSpriteTextures } from './sprite';
 import { GameState, GameStateManager } from '../game/state';
 import { Weapon, WeaponState } from '../game/weapon';
-import { slideAlongAxis, PLAYER_RADIUS, ENEMY_RADIUS, MIN_ENTITY_DIST,
+import { slideAlongX, slideAlongY, PLAYER_RADIUS, ENEMY_RADIUS, MIN_ENTITY_DIST,
          resolveAllEntityOverlaps, wouldOverlapEntity, resolveEntityCollision } from './collision';
 import { Minimap } from '../game/minimap';
 import { SoundManager, SoundType } from '../audio/sound';
@@ -1667,8 +1667,8 @@ export class Renderer {
         const moveY = (dy / dist) * chaseSpeed * deltaTime;
 
         // Wall collision (Sliding) — use ENEMY_RADIUS
-        let newX = slideAlongAxis(sprite.x, moveX, sprite.y, ENEMY_RADIUS);
-        let newY = slideAlongAxis(sprite.y, moveY, newX, ENEMY_RADIUS);
+        let newX = slideAlongX(sprite.x, moveX, sprite.y, ENEMY_RADIUS);
+        let newY = slideAlongY(sprite.y, moveY, newX, ENEMY_RADIUS);
 
         // Check: would new position overlap with player?
         if (wouldOverlapEntity(newX, newY, ENEMY_RADIUS,
