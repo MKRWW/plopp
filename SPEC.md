@@ -1,187 +1,161 @@
-## Dead-Body Corpse Persistence Spec
+Now I have everything I need. Here is the spec:
 
-```markdown
+---
+
 ## Problem
 
-When an NPC's health reaches 0, the engine runs a 0.45-second shrink-and-sink death
-animation and then removes the sprite entirely (`this.sprites.splice(idx, 1)` at
-`renderer.ts:1833`). The level becomes cleaner than the combat it depicts; there is no
-visual record of kills. Classic Doom retained corpses on the floor for the entire session.
-The goal is to leave a flat "dead body" billboard in place of every killed NPC, persisting
-until the player exits the level.
+`Renderer.advanceStage()` (`renderer.ts:493–518`) calls `generateLevel()` synchronously and immediately commits the result in the same animation frame. There is no visual transition, no input blocking, and no feedback. At higher stages the generator can retry internally up to 50 times, which can cause a visible stutter. The exit trigger at `renderer.ts:1933–1940` fires during the normal game-loop update path, so the level swap happens mid-frame with no ceremony. Stage 1 is correctly generated synchronously at startup in `main.ts` before the game loop runs; only stage transitions (stage 2, 3, …) need the loading screen.
 
 ---
 
 ## Files to touch
 
-| File | Reason |
+| File | What changes |
 |---|---|
-| `src/engine/sprite.ts` | Add `isDead` state flag and `corpseTexture` field to the `Sprite` class |
-| `src/engine/sprite-textures.ts` | Add `generateCorpseTexture()` — a procedural top-down bloodied-body tile |
-| `src/engine/renderer.ts` | Death transition, corpse rendering branch, AI/collision exclusion |
-
-No other files require changes. Level data, collision constants, z-buffer, and sound
-systems are unaffected.
+| `src/game/state.ts` | Add `LOADING = 'loading'` to `GameState`; add `renderLoading(ctx, w, h, progress, stage)` method |
+| `src/engine/renderer.ts` | Replace `advanceStage()` with async `beginLevelTransition()`; add loading-state fields; guard game-loop update path |
+| `src/main.ts` | No change — stage 1 generation before the loop is unaffected |
+| `src/engine/level-gen.ts` | No change — already deterministic via `mulberry32(seed ^ stage * 0x9E3779B9)` |
 
 ---
 
 ## Approach
 
-### 1. Sprite class (`sprite.ts`)
+### 1. Add `LOADING` state — `src/game/state.ts`
 
-Add two fields to the `Sprite` class (after the existing `isDying`/`deathTimer` block,
-around line 58):
+Add `LOADING = 'loading'` to the `GameState` enum between `PAUSED` and `DEAD`.
+
+Add a new public method `renderLoading(ctx, w, h, progress: number, stage: number)`:
+- Full black background: `ctx.fillStyle = '#000'; ctx.fillRect(0, 0, w, h)`
+- Centered "STAGE N" text at `h/2 - 70`, bold 40px monospace, white
+- Rotating arc spinner at `h/2` center: radius 32px, white stroke lineWidth 4, arc from `t` to `t + 1.8π` where `t = (Date.now() / 300) % (2π)` — draw each frame from caller
+- "Loading… XX%" text at `h/2 + 60`, 18px monospace, `#aaa`, where XX is `Math.floor(progress * 100)`
+- Progress bar: 220px wide, 10px tall, centered at `h/2 + 90`; grey background `#333`, red fill `#cc0000` to `progress * 220` width, 2px white border
+
+The `GameStateManager.render()` switch must fall through to `renderLoading` when state is `LOADING`; the caller (Renderer) passes `progress` and `stage` as extra arguments, which `render()` should accept as optional params and forward.
+
+### 2. Loading-state fields — `src/engine/renderer.ts`
+
+Add to the `Renderer` class:
 
 ```ts
-isDead: boolean = false;      // settled corpse — animation complete
-corpseTexture: Texture | null = null;
+private isLoading: boolean = false;
+private loadingProgress: number = 0;         // 0.0 → 1.0
+private pendingLevel: Level | null = null;
+private loadingTargetStage: number = 0;
+private loadingAnimStart: number = 0;
+private readonly LOAD_ANIM_MS = 700;         // progress bar animation duration
 ```
 
-`isDead` is the third lifecycle state after `isAlive` and `isDying`. The lifecycle
-becomes: **alive → dying (0.45 s animation) → dead (permanent)**.
+### 3. Replace `advanceStage()` with `beginLevelTransition()` — `src/engine/renderer.ts`
 
-### 2. Corpse texture (`sprite-textures.ts`)
+Delete the existing `advanceStage()` body. Replace with:
 
-Add `generateCorpseTexture(w: number, h: number): Texture`. The texture should read as a
-body lying face-down:
-
-- Background: transparent / floor-coloured (alpha 0 for transparent pixels so the floor
-  shows through).
-- Silhouette drawn as a roughly humanoid elongated blob centred on the tile, using the
-  same dark-reddish palette already used for the death tint (`r≈80, g≈20, b≈15`).
-- A dark blood-pool ellipse behind/around the silhouette.
-- Use the same 64×64 canvas size as all other generated textures so the rendering
-  pipeline needs no special-casing on dimensions.
-
-Attach the result to each enemy `Sprite` at creation time:
-
-```ts
-enemy.corpseTexture = generateCorpseTexture(TEX_W, TEX_H);  // renderer.ts initializeSprites()
 ```
+private beginLevelTransition(): void {
+  if (this.isLoading) return;                        // guard double-trigger
+  this.isLoading = true;
+  this.loadingTargetStage = this.stage + 1;
+  this.loadingProgress = 0;
+  this.gameStateManager.transitionTo(GameState.LOADING);
 
-### 3. Death transition (`renderer.ts` — update loop ~line 1830)
-
-Replace the current splice-on-expire block:
-
-```ts
-// BEFORE
-if (sprite.deathTimer <= 0) {
-  const idx = this.sprites.indexOf(sprite);
-  if (idx >= 0) this.sprites.splice(idx, 1);
+  // Defer generation by one setTimeout so the LOADING frame paints first.
+  setTimeout(() => {
+    this.pendingLevel = generateLevel(this.baseSeed, this.loadingTargetStage);
+    this.loadingAnimStart = performance.now();
+  }, 0);
 }
 ```
 
-```ts
-// AFTER
-if (sprite.deathTimer <= 0) {
-  sprite.isDying = false;
-  sprite.isDead = true;
-  // x/y remain unchanged — corpse stays where the enemy died
-}
+The `setTimeout(..., 0)` ensures at least one `requestAnimationFrame` fires (and paints the black loading screen) before the synchronous `generateLevel` call blocks the thread. `generateLevel` takes <30ms even at max stage, so the single-frame gap is sufficient.
+
+### 4. Main game-loop integration — `src/engine/renderer.ts`
+
+In the main render/update method (the `requestAnimationFrame` callback):
+
+**When `gameState === GameState.LOADING`:**
+- Skip all gameplay: no `updatePlayer()`, no enemy AI, no `worldState.updateWorld()`, no shooting
+- Render loading screen: black fill + call `gameStateManager.render(ctx, w, h, this.loadingProgress, this.loadingTargetStage)`
+- If `this.pendingLevel !== null` (generation done):
+  - Compute `elapsed = performance.now() - this.loadingAnimStart`
+  - `this.loadingProgress = Math.min(elapsed / this.LOAD_ANIM_MS, 1.0)`
+  - When `this.loadingProgress >= 1.0`:
+    - Apply the level (see §5 below)
+    - `this.isLoading = false; this.pendingLevel = null`
+    - `this.gameStateManager.transitionTo(GameState.PLAYING)`
+- Return early (do not execute raycasting or sprite rendering)
+
+**When `gameState === GameState.PLAYING` and `this.isLoading`:**
+- This gap cannot occur (LOADING state is held until `isLoading` is cleared), but add the guard defensively.
+
+**Exit door trigger (existing code at `renderer.ts:1933`):**
+- Replace `this.advanceStage()` with `this.beginLevelTransition()`
+- Keep all surrounding conditions unchanged (hasKeycard, distance check, edge trigger)
+
+### 5. Applying the pending level
+
+Extract the install logic from `advanceStage()` into a private `installLevel(level: Level)`:
+
+```
+worldState.loadLevel(level);
+this.currentLevel = level;
+this.stage = this.loadingTargetStage;
+this.player.setPosition(level.spawn.x, level.spawn.y);
+this.player.dirX = level.spawn.dirX;
+this.player.dirY = level.spawn.dirY;
+this.player.planeX = -level.spawn.dirY * 0.66;
+this.player.planeY = level.spawn.dirX * 0.66;
+this.hasKeycard = false;
+this.keycardPickupMessage = 0;
+this.doorMessage = '';
+this.doorMessageTimer = 0;
+this.sprites = [];
+this.initializeSprites();
+this.stageBannerTimer = this.stageBannerDuration;
+this.soundManager.play(SoundType.DOOR);
 ```
 
-The sprite stays in `this.sprites` forever (until level reload clears the array).
+This is the same logic as the current `advanceStage()` — just deferred to when `loadingProgress >= 1.0`.
 
-### 4. AI and collision exclusion (`renderer.ts` — enemy update loop ~line 1701)
+### 6. Input blocking
 
-The AI guard is currently `!s.isDying`. Extend it:
+`updatePlayer()` and `handleShoot()` must not execute while `isLoading`. The existing check `if (gameState !== GameState.PLAYING) return` already gates `updatePlayer` — because state is `LOADING`, not `PLAYING`, during the transition. The mousedown listener for shooting also checks `gameState === GameState.PLAYING` (`renderer.ts:141`), so it is blocked automatically. No additional changes needed in `input.ts`.
 
-```ts
-// line ~1701
-if (!s.isAlive || s.isDying || s.isDead) continue;
-```
+`GameStateManager`'s keydown listener must ignore LOADING: add `|| this.state === GameState.LOADING` to the guard conditions for Enter, Space, and Escape so they cannot interrupt a transition.
 
-In `wouldOverlapEntity` / `resolveEntityCollision` helpers (and the
-`resolveAllEntityOverlaps` pass at ~line 1766), skip any sprite where `s.isDead` is
-true. Players and living enemies should walk through corpses without deflection.
+### 7. Determinism — no changes required
 
-### 5. Corpse rendering branch (`renderer.ts` — `renderSprites()` ~line 594)
-
-After the existing angle-view selection block, add a dedicated branch for dead sprites.
-Dead sprites skip the 8-direction pose logic, shadow, hit-flash, and death-tint:
-
-```
-if (sprite.isDead && sprite.corpseTexture) {
-  texture = sprite.corpseTexture
-
-  // Render flat: small fixed height (~18 % of full sprite height),
-  // anchored to the floor line.
-  //   spriteHeight = Math.abs(Math.floor(SCREEN_HEIGHT / transformY)) * CORPSE_SCALE
-  //   CORPSE_SCALE = 0.18
-  //   drawStartY = horizon + Math.floor(spriteHeight / 2)  // sits ON the floor
-  //   drawEndY   = drawStartY + spriteHeight
-
-  // Width uses same scale as height (square billboard projected flat).
-  // Z-buffer depth test is identical to living sprites — walls occlude corpses.
-  // No shadow ellipse (body IS the shadow).
-  // Apply distance-based brightness darkening same as walls/floor.
-}
-```
-
-The "flat on floor" illusion comes entirely from the small scale factor and the low
-vertical anchor point — no change to the projection math is needed.
-
-Existing living/dying render paths are unchanged; the `isDead` branch is a short-circuit
-at the top of the per-sprite loop.
+`generateLevel(baseSeed, stage)` seeds its PRNG with `mulberry32(baseSeed ^ (stage * 0x9E3779B9))`. `baseSeed` is fixed for the session at `main.ts:19`. Every level is fully determined by `(baseSeed, stage)`. No new state is introduced.
 
 ---
 
 ## Acceptance criteria
 
-1. After an NPC's death animation completes its full 0.45 s, a corpse sprite is visible
-   on the floor at the NPC's last position.
-2. The corpse persists for the entire session on that level (survives any number of
-   additional kills, player movement, weapon reloads).
-3. The corpse is correctly occluded by walls using the existing z-buffer; a wall between
-   the player and the corpse hides the corpse fully or partially.
-4. Corpses are sorted with all other sprites by distance each frame; multiple overlapping
-   corpses render in correct painter's-algorithm order.
-5. The player and all living enemies can walk through corpse positions without any
-   collision deflection.
-6. The living enemy AI (chase/attack) is unaffected by the presence of corpses.
-7. Corpse sprites do not animate (frozen single frame).
-8. On level transition (new procedural level), all corpses are gone (the `sprites` array
-   is rebuilt from scratch in `initializeSprites()`).
-9. Performance: 20 simultaneous corpses on screen produce no measurable frame-rate drop
-   on a mid-range laptop (corpses are cheaper than living enemies: no AI, no animation
-   update, no shadow).
-10. No corpse texture bleeds into item or decor sprite slots.
+1. Pressing E at the exit door (keycard held, distance < 1.5 tiles) immediately renders a black loading screen — no frame shows the new level before the loading screen.
+2. Loading screen displays: correct "STAGE N" number, a continuously rotating spinner arc, "Loading… XX%" text, and a red progress bar that fills left-to-right from 0% to 100%.
+3. The progress bar reaches 100% and the new game world is not visible until the bar completes.
+4. No player movement, camera rotation, shooting, or enemy AI executes while the loading screen is active.
+5. After transition, the player is positioned at `level.spawn` with the correct facing direction.
+6. All NPCs, items, ammo, health, secret health, and decor sprites defined in the new `Level` object are present and interactable.
+7. `hasKeycard` is `false` at the start of each new stage; the exit door cannot be opened without collecting the new level's keycard.
+8. The "STAGE N" banner appears after the loading screen clears (using the existing `stageBannerTimer` path).
+9. ESC keypresses during the loading screen are ignored; no state corruption occurs.
+10. Giving the same `baseSeed` produces identical level layouts for every stage across two runs.
+11. The total time from E-press to playable game (loading screen + generation + animation) is ≤ 2 seconds on a mid-range machine.
+12. DEAD → MENU and WIN → MENU flows do not show a loading screen.
 
 ---
 
 ## Test plan
 
-**Manual — single kill**
-- Start a level, shoot one enemy until dead.
-- Observe the death animation plays to completion.
-- After animation ends, a flat dark body sprite is on the floor where the enemy was.
-- Walk toward the corpse position; player passes through without being pushed.
-- Walk away and look back; corpse is still visible and correctly depth-sorted with walls.
-
-**Manual — multiple kills**
-- Kill 5+ enemies in the same room.
-- All corpses remain simultaneously.
-- Walk between them; no collision or jitter.
-- Shoot a living enemy that is near a corpse; blood/tint on the new kill does not affect
-  the existing corpse's appearance.
-
-**Manual — wall occlusion**
-- Stand so a wall is between the camera and a corpse.
-- Corpse must not bleed through the wall (z-buffer test).
-- Step sideways until corpse comes into view; it appears cleanly at the correct moment.
-
-**Manual — level transition**
-- Kill some enemies, then reach the exit door and start a new level.
-- No corpses are present in the new level.
-
-**Manual — performance baseline**
-- Kill all enemies reachable in the first generated level (typically 5–8).
-- Open browser dev-tools performance panel and confirm consistent frame rendering.
-
-**Code review checks**
-- `isDead` sprites are excluded from every collision resolution call site.
-- `isDead` sprites are excluded from the AI update loop.
-- `generateCorpseTexture` is called once per enemy at spawn, not every frame.
-- The `corpseTexture` field on non-enemy sprites (items, decor) is `null` and the corpse
-  render branch is guarded by `sprite.type === SpriteType.ENEMY` (or equivalent).
-```
+1. **Basic transition** — Start, collect keycard, press E at exit door. Verify: (a) screen cuts to black immediately, (b) loading screen with correct stage number appears, (c) spinner rotates, (d) progress bar fills to 100%, (e) game world appears after bar completes.
+2. **Progress animation** — Time the progress bar from appearance to 100% with a stopwatch. Must take approximately 700ms and not jump instantly.
+3. **Input blocking** — During loading screen, rapidly press WASD and move mouse. After transition confirm player is at spawn (not at pre-load position), and no shots were fired.
+4. **Keycard reset** — After stage transition, approach exit door without keycard. Confirm "Locked" message appears; the E key does not advance to the next stage.
+5. **Multi-stage chain** — Play stages 1 → 2 → 3 in sequence. Each transition must show the correct stage number on the loading screen.
+6. **ESC during loading** — Press ESC while loading screen is visible. Confirm no crash, no pause overlay, and the loading screen completes normally.
+7. **Determinism** — Temporarily `console.log(baseSeed)` in `main.ts`. Run with that seed twice (hardcode it). Compare level layouts (minimap, keycard position, exit door position) for stages 1, 2, and 3 — they must be identical.
+8. **Dead/win no loading** — Die during gameplay → DEAD screen appears (no loading screen). WIN condition (should not occur mid-transition) — confirm no loading screen.
+9. **Double-trigger guard** — Rapidly double-tap E at the exit door. Confirm only one level transition occurs (the `isLoading` guard prevents re-entry).
+10. **Performance at high stage** — Fast-forward to stage 10+ by temporarily hardcoding `loadingTargetStage`. Measure wall-clock time from E-press to playable. Must be < 2000ms.
+11. **Spinner continuity** — During loading screen, confirm the spinner arc rotates smoothly with no pause during the `generateLevel` call (verify it resumes immediately after the setTimeout fires).

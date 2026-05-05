@@ -103,6 +103,14 @@ export class Renderer {
   private stageBannerTimer: number = 0;
   private readonly stageBannerDuration: number = 2.0;
 
+  // Loading screen state for stage transitions
+  private isLoading: boolean = false;
+  private loadingProgress: number = 0;
+  private pendingLevel: Level | null = null;
+  private loadingTargetStage: number = 0;
+  private loadingAnimStart: number = 0;
+  private readonly LOAD_ANIM_MS = 700;
+
   constructor(
     player: Player,
     gameStateManager: GameStateManager,
@@ -485,27 +493,36 @@ export class Renderer {
     }
   }
 
-  /**
-   * Generiert das nächste Level und installiert es: Welt-State, Spielerposition,
-   * Sprites und transienter HUD-Banner. Health/Score/Ammo bleiben erhalten —
-   * Stages sind kumulativ wie im Original-Doom.
+ /**
+   * Startet einen asynchronen Level-Übergang mit Loading-Screen.
    */
-  private advanceStage(): void {
-    const nextStage = this.stage + 1;
-    const nextLevel = generateLevel(this.baseSeed, nextStage);
-    worldState.loadLevel(nextLevel);
-    this.currentLevel = nextLevel;
-    this.stage = nextStage;
+  private beginLevelTransition(): void {
+    if (this.isLoading) return;
+    this.isLoading = true;
+    this.loadingTargetStage = this.stage + 1;
+    this.loadingProgress = 0;
+    this.gameStateManager.transitionTo(GameState.LOADING);
 
-    // Spieler positionieren + Blickrichtung
-    this.player.setPosition(nextLevel.spawn.x, nextLevel.spawn.y);
-    this.player.dirX = nextLevel.spawn.dirX;
-    this.player.dirY = nextLevel.spawn.dirY;
-    // Camera-Plane senkrecht zur Blickrichtung, |plane| = 0.66 (FOV ≈ 66°)
-    this.player.planeX = -nextLevel.spawn.dirY * 0.66;
-    this.player.planeY = nextLevel.spawn.dirX * 0.66;
+    setTimeout(() => {
+      this.pendingLevel = generateLevel(this.baseSeed, this.loadingTargetStage);
+      this.loadingAnimStart = performance.now();
+    }, 0);
+  }
 
-    // Pro-Stage-Reset
+  /**
+   * Installiert ein vorbereitetes Level: setzt Welt, Spieler-Position, Sprites.
+   */
+  private installLevel(level: Level): void {
+    worldState.loadLevel(level);
+    this.currentLevel = level;
+    this.stage = level.stage;
+
+    this.player.setPosition(level.spawn.x, level.spawn.y);
+    this.player.dirX = level.spawn.dirX;
+    this.player.dirY = level.spawn.dirY;
+    this.player.planeX = -level.spawn.dirY * 0.66;
+    this.player.planeY = level.spawn.dirX * 0.66;
+
     this.hasKeycard = false;
     this.keycardPickupMessage = 0;
     this.doorMessage = '';
@@ -1727,6 +1744,11 @@ export class Renderer {
     this.doorMessage = '';
     this.doorMessageTimer = 0;
     this.stageBannerTimer = 0;
+
+    // Clear loading state to prevent zombie state on simultaneous death + exit
+    this.isLoading = false;
+    this.pendingLevel = null;
+    this.loadingProgress = 0;
   }
 
   /**
@@ -1854,6 +1876,20 @@ export class Renderer {
       previousState = gameState;
 
       // Update-Logik (nur wenn PLAYING)
+      if (gameState === GameState.LOADING) {
+        // Loading screen animation + pending level check
+        if (this.pendingLevel !== null) {
+          const elapsed = performance.now() - this.loadingAnimStart;
+          this.loadingProgress = Math.min(elapsed / this.LOAD_ANIM_MS, 1.0);
+          if (this.loadingProgress >= 1.0) {
+            this.installLevel(this.pendingLevel);
+            this.isLoading = false;
+            this.pendingLevel = null;
+            this.gameStateManager.transitionTo(GameState.PLAYING);
+          }
+        }
+      }
+
       if (gameState === GameState.PLAYING) {
         this.updatePlayer(deltaTime);
 
@@ -1936,7 +1972,7 @@ export class Renderer {
           const exitDistSq = exitDx * exitDx + exitDy * exitDy;
           if (exitDistSq < 1.5 * 1.5) {
             this.player.score += 500;
-            this.advanceStage();
+            this.beginLevelTransition();
           }
         }
         this.wasExitEPressed = this.input.isKey('KeyE');
@@ -1969,34 +2005,39 @@ export class Renderer {
         this.ctx.translate(shakeX, shakeY);
       }
 
-      // Render (immer, auch im Menu)
-      this.drawFloorAndCeiling();
-      this.castRays();
-      this.renderSprites();
+      // LOADING: render loading screen, skip gameplay rendering
+      if (gameState === GameState.LOADING) {
+        this.gameStateManager.render(this.ctx, SCREEN_WIDTH, SCREEN_HEIGHT, this.weapon.health, this.loadingProgress, this.loadingTargetStage);
+      } else {
+        // Render (immer, auch im Menu)
+        this.drawFloorAndCeiling();
+        this.castRays();
+        this.renderSprites();
 
-      // Weapon nur im Spiel rendern
-      if (gameState === GameState.PLAYING || gameState === GameState.PAUSED) {
-        this.drawWeapon();
-        this.drawHUD();
-        this.drawDamageFlash();
-        this.drawHitMarker();
-        this.drawWallImpact();
+        // Weapon nur im Spiel rendern
+        if (gameState === GameState.PLAYING || gameState === GameState.PAUSED) {
+          this.drawWeapon();
+          this.drawHUD();
+          this.drawDamageFlash();
+          this.drawHitMarker();
+          this.drawWallImpact();
 
-        // Phase 8: Minimap rendern (Debug-Modus: vergrößert + Kollisions-Overlay)
-        this.minimap.render(this.player, this.sprites);
-        const mmSize = this.minimap.getSize();
-        this.ctx.drawImage(
-          this.minimap.getCanvas(),
-          0, 0, mmSize, mmSize,
-          this.minimap.getX(), this.minimap.getY(), mmSize, mmSize
-        );
+          // Phase 8: Minimap rendern (Debug-Modus: vergrößert + Kollisions-Overlay)
+          this.minimap.render(this.player, this.sprites);
+          const mmSize = this.minimap.getSize();
+          this.ctx.drawImage(
+            this.minimap.getCanvas(),
+            0, 0, mmSize, mmSize,
+            this.minimap.getX(), this.minimap.getY(), mmSize, mmSize
+          );
+        }
+
+        // Game State Screens (Menu, Dead, Win, Paused)
+        this.gameStateManager.render(this.ctx, SCREEN_WIDTH, SCREEN_HEIGHT, this.weapon.health);
       }
 
       // Screen Shake: Transform zurücksetzen
       this.ctx.restore();
-
-      // Game State Screens (Menu, Dead, Win, Paused)
-      this.gameStateManager.render(this.ctx, SCREEN_WIDTH, SCREEN_HEIGHT, this.weapon.health);
 
       // Nächster Frame
       requestAnimationFrame(loop);

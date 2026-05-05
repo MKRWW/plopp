@@ -10,6 +10,7 @@ export enum GameState {
   MENU = 'menu',
   PLAYING = 'playing',
   PAUSED = 'paused',
+  LOADING = 'loading',
   DEAD = 'dead',
   WIN = 'win'
 }
@@ -23,6 +24,7 @@ export class GameStateManager {
   constructor() {
     // Enter-Taste: Menu starten / Neustart
     window.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (this.state === GameState.LOADING) return;
       if (e.code === 'Enter' || e.code === 'Space') {
         if (this.state === GameState.MENU) {
           this.transitionTo(GameState.PLAYING);
@@ -47,10 +49,10 @@ export class GameStateManager {
     this.state = newState;
   }
 
-  /**
-   * Render des aktuellen State-Screens.
-   */
-  public render(ctx: CanvasRenderingContext2D, width: number, height: number, _playerHealth?: number): void {
+ /**
+    * Render des aktuellen State-Screens.
+    */
+  public render(ctx: CanvasRenderingContext2D, width: number, height: number, _playerHealth?: number, _loadingProgress?: number, _loadingStage?: number): void {
     switch (this.state) {
       case GameState.MENU:
         this.renderMenu(ctx, width, height);
@@ -63,6 +65,9 @@ export class GameStateManager {
         break;
       case GameState.PAUSED:
         this.renderPaused(ctx, width, height);
+        break;
+      case GameState.LOADING:
+        this.renderLoading(ctx, width, height, _loadingProgress ?? 0, _loadingStage ?? 0);
         break;
       // PLAYING → nichts rendern (Spieler sieht die Welt)
     }
@@ -170,6 +175,45 @@ export class GameStateManager {
     ctx.fillStyle = '#aaa';
     ctx.font = '18px monospace';
     ctx.fillText('ESC zum Fortsetzen', w / 2, h / 2 + 20);
+    ctx.textAlign = 'left';
+  }
+
+  private renderLoading(ctx: CanvasRenderingContext2D, w: number, h: number, progress: number, stage: number): void {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 40px monospace';
+    ctx.fillText(`STAGE ${stage}`, w / 2, h / 2 - 70);
+
+    const t = (Date.now() / 300) % (Math.PI * 2);
+    const spinnerCx = w / 2;
+    const spinnerCy = h / 2;
+    const spinnerRadius = 32;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(spinnerCx, spinnerCy, spinnerRadius, t, t + 1.8 * Math.PI);
+    ctx.stroke();
+
+    ctx.fillStyle = '#aaa';
+    ctx.font = '18px monospace';
+    const pct = Math.floor(progress * 100);
+    ctx.fillText(`Loading… ${pct}%`, w / 2, h / 2 + 60);
+
+    const barW = 220;
+    const barH = 10;
+    const barX = (w - barW) / 2;
+    const barY = h / 2 + 90;
+    ctx.fillStyle = '#333';
+    ctx.fillRect(barX, barY, barW, barH);
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(barX, barY, barW, barH);
+    ctx.fillStyle = '#cc0000';
+    ctx.fillRect(barX + 1, barY + 1, Math.max(0, (barW - 2) * progress), barH - 2);
+
     ctx.textAlign = 'left';
   }
 }
