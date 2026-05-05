@@ -1,0 +1,89 @@
+name: aiDoom - Local RTX Agent
+version: 1.0.0
+schema: v1
+
+models:
+  # Chat/Edit/Apply/Agent via the OpenAI-compatible llama.cpp/vLLM endpoint.
+  - name: Qwen3.6-27B RTX Agent
+    provider: openai
+    model: Qwen3.6-27B-Q4_K_M.gguf
+    apiBase: http://192.168.178.100:8001/v1
+    apiKey: anything
+    roles:
+      - chat
+      - edit
+      - apply
+    capabilities:
+      - tool_use
+    defaultCompletionOptions:
+      contextLength: 32768
+      maxTokens: 4096
+      temperature: 0.25
+      topP: 0.9
+
+  # Fast local tab autocomplete through Ollama.
+  - name: qwen2.5-coder-1.5b Autocomplete
+    provider: ollama
+    model: qwen2.5-coder:1.5b
+    apiBase: http://192.168.178.100:11434
+    roles:
+      - autocomplete
+    defaultCompletionOptions:
+      contextLength: 8192
+      maxTokens: 256
+      temperature: 0.1
+    autocompleteOptions:
+      debounceDelay: 250
+      maxPromptTokens: 4096
+      onlyMyCode: true
+
+  # Local embeddings for codebase context.
+  - name: Nomic Embed
+    provider: ollama
+    model: nomic-embed-text-v2-moe
+    apiBase: http://192.168.178.100:11434
+    roles:
+      - embed
+
+context:
+  - provider: file
+  - provider: code
+  - provider: diff
+  - provider: terminal
+
+rules:
+  - Antworte kurz und direkt, aber arbeite im Agent Mode autonom weiter, wenn die Aufgabe eindeutig ist.
+  - Erstelle und bearbeite Dateien direkt im Workspace, statt nur Code in den Chat zu schreiben.
+  - Nutze TypeScript, React 18 und Vite fuer das Projekt.
+  - Nutze raw WebGL fuer die 3D-Engine. Verwende kein Three.js.
+  - Halte die Implementierung lauffaehig mit npm run dev.
+
+prompts:
+  - name: doom-agent
+    description: Baut den agentischen Doom-Clone im aktuellen Workspace
+    prompt: |
+      Baue in diesem Workspace einen lauffaehigen Doom-/Wolfenstein-Style Browser-Clone.
+
+      Ziel:
+      - React 18 + TypeScript + Vite
+      - Raw WebGL fuer die 3D-Engine, kein Three.js
+      - CSS Modules fuer UI/HUD
+      - Funktionsfaehig mit npm run dev
+
+      Implementiere:
+      1. package.json, vite.config.ts, tsconfig.json und index.html
+      2. src/main.tsx und src/App.tsx
+      3. src/engine/WebGLEngine.ts als eigene Engine-Klasse
+      4. WebGL Raycasting Engine im Wolfenstein-Stil mit 3D-Gefuehl
+      5. WASD-Bewegung und Maus-Look mit Pointer Lock API
+      6. Kollisionserkennung gegen Waende
+      7. Mindestens zwei procedural generierte Wandtexturen
+      8. Minimap als Canvas-2D-Overlay
+      9. HUD mit Health und Ammo
+      10. Eine hardcodierte 16x16 Map
+
+      Arbeitsweise:
+      - Arbeite autonom.
+      - Stelle nur Fragen, wenn ein echter Blocker auftaucht.
+      - Schreibe die Dateien direkt in den Workspace.
+      - Starte mit der Projektstruktur und pruefe am Ende, ob npm run dev starten kann.
