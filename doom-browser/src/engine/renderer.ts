@@ -199,6 +199,20 @@ export class Renderer {
 
       // Wenn Gegner tot → Death-Animation starten
       if (hit.health <= 0) {
+        // Letzte angle-aware Textur einfrieren, damit die Death-Animation
+        // den zuletzt gesehenen Blickwinkel behält statt auf "front" zurückzuspringen.
+        if (hit.angleViews.length > 0) {
+          const px = this.player.x;
+          const py = this.player.y;
+          const angleToCamera = Math.atan2(py - hit.y, px - hit.x);
+          const rel = angleToCamera - hit.facingAngle;
+          const norm = ((rel % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+          const angleIdx = Math.floor((norm + Math.PI / 8) / (Math.PI / 4)) % 8;
+          const poseIdx = Math.min(hit.currentFrame, hit.angleViews.length - 1);
+          const frozen = hit.angleViews[poseIdx]?.[angleIdx];
+          if (frozen) hit.texture = frozen;
+        }
+
         hit.isAlive = false;
         hit.isDying = true;
         hit.deathTimer = hit.deathDuration;
@@ -360,11 +374,12 @@ export class Renderer {
    * Initialisiert Test-Sprites in der Welt.
    */
   private initializeSprites(): void {
-    const spriteTextures = generateSpriteTextures();
-    const enemyTextures = spriteTextures.get(SpriteType.ENEMY);
-    const ammoTextures = spriteTextures.get(SpriteType.AMMO);
-    const healthTextures = spriteTextures.get(SpriteType.HEALTH);
-    const keycardTextures = spriteTextures.get(SpriteType.KEYCARD);
+    const spriteSet = generateSpriteTextures();
+    const flat = spriteSet.flat;
+    const enemyTextures = flat.get(SpriteType.ENEMY);
+    const ammoTextures = flat.get(SpriteType.AMMO);
+    const healthTextures = flat.get(SpriteType.HEALTH);
+    const keycardTextures = flat.get(SpriteType.KEYCARD);
 
     // --- Gegner (6 Stück verteilt über die Karte) ---
     const enemyPositions = [
@@ -379,34 +394,38 @@ export class Renderer {
     for (const pos of enemyPositions) {
       const enemy = new Sprite(pos.x, pos.y, SpriteType.ENEMY, enemyTextures?.[0] ?? null);
       if (enemyTextures) enemy.textures = enemyTextures;
+      enemy.angleViews = spriteSet.enemyAngleViews;
+      enemy.facingAngle = Math.atan2(this.player.y - pos.y, this.player.x - pos.x);
       enemy.animationSpeed = 0.4;
       this.sprites.push(enemy);
     }
 
-    // --- Items ---
+    // --- Items (rotierend, 8 Frames) ---
     const ammo = new Sprite(7.5, 3.5, SpriteType.AMMO, ammoTextures?.[0] ?? null);
     if (ammoTextures) ammo.textures = ammoTextures;
+    ammo.animationSpeed = 0.12;
     this.sprites.push(ammo);
 
     const health = new Sprite(10.5, 10.5, SpriteType.HEALTH, healthTextures?.[0] ?? null);
     if (healthTextures) health.textures = healthTextures;
+    health.animationSpeed = 0.12;
     this.sprites.push(health);
 
-    // Extra Ammo im hinteren Bereich
     const ammo2 = new Sprite(13.5, 13.5, SpriteType.AMMO, ammoTextures?.[0] ?? null);
     if (ammoTextures) ammo2.textures = ammoTextures;
+    ammo2.animationSpeed = 0.12;
     this.sprites.push(ammo2);
 
-    // Keycard — in einem abgelegenen Bereich (oben rechts)
     const keycard = new Sprite(13.5, 2.5, SpriteType.KEYCARD, keycardTextures?.[0] ?? null);
     if (keycardTextures) keycard.textures = keycardTextures;
+    keycard.animationSpeed = 0.12;
     this.sprites.push(keycard);
 
-    // --- Dekor-Sprites (nicht-interaktiv, Atmosphäre) ---
-    const barrelTextures = spriteTextures.get(SpriteType.BARREL);
-    const terminalTextures = spriteTextures.get(SpriteType.TERMINAL);
-    const lampTextures = spriteTextures.get(SpriteType.LAMP);
-    const debrisTextures = spriteTextures.get(SpriteType.DEBRIS);
+    // --- Dekor-Sprites ---
+    const barrelTextures = flat.get(SpriteType.BARREL);
+    const terminalTextures = flat.get(SpriteType.TERMINAL);
+    const lampTextures = flat.get(SpriteType.LAMP);
+    const debrisTextures = flat.get(SpriteType.DEBRIS);
 
     const addDecor = (x: number, y: number, type: SpriteType, textures: Texture[] | undefined) => {
       const decor = new Sprite(x, y, type, textures?.[0] ?? null);
@@ -508,8 +527,48 @@ export class Renderer {
       // Distanz-basierte Helligkeit (gleich wie Wände)
       const baseBrightness = Math.min(1.0, 2.0 / (1.0 + transformY * 0.3));
 
-      // Sprite-Textur verwenden (oder Fallback-Farbe)
-      const texture = sprite.texture;
+      // Sprite-Textur wählen: Gegner mit angleViews → richtungsabhängig
+      let texture: Texture | null = sprite.texture;
+      if (
+        sprite.type === SpriteType.ENEMY &&
+        sprite.angleViews.length > 0 &&
+        !sprite.isDying
+      ) {
+        const angleToCamera = Math.atan2(py - sprite.y, px - sprite.x);
+        const rel = angleToCamera - sprite.facingAngle;
+        const norm = ((rel % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+        const angleIdx = Math.floor((norm + Math.PI / 8) / (Math.PI / 4)) % 8;
+        const poseIdx = Math.min(sprite.currentFrame, sprite.angleViews.length - 1);
+        const views = sprite.angleViews[poseIdx];
+        if (views && views[angleIdx]) {
+          texture = views[angleIdx];
+        }
+      }
+
+      // Boden-Schatten: flache Ellipse am Sprite-Fuß (z-buffer-aware)
+      if (!sprite.isDying || deathProgress < 0.5) {
+        const shadowCenterY = SCREEN_HEIGHT / 2 + spriteHeight / 2;
+        const shadowRX = Math.max(2, spriteWidth * 0.32);
+        const shadowRY = Math.max(1, spriteHeight * 0.06);
+        const shadowAlpha = 0.5 * baseBrightness;
+        this.ctx.fillStyle = `rgba(0,0,0,${shadowAlpha})`;
+        const sxStart = Math.floor(spriteScreenX - shadowRX);
+        const sxEnd = Math.ceil(spriteScreenX + shadowRX);
+        for (let sx = sxStart; sx <= sxEnd; sx++) {
+          if (sx < 0 || sx >= SCREEN_WIDTH) continue;
+          if (transformY >= this.zBuffer.get(sx)) continue;
+          const dxNorm = (sx - spriteScreenX) / shadowRX;
+          if (dxNorm < -1 || dxNorm > 1) continue;
+          const halfH = shadowRY * Math.sqrt(Math.max(0, 1 - dxNorm * dxNorm));
+          const y0 = Math.floor(shadowCenterY - halfH);
+          const y1 = Math.floor(shadowCenterY + halfH);
+          const yClamped0 = Math.max(0, y0);
+          const yClamped1 = Math.min(SCREEN_HEIGHT - 1, y1);
+          if (yClamped1 >= yClamped0) {
+            this.ctx.fillRect(sx, yClamped0, 1, yClamped1 - yClamped0 + 1);
+          }
+        }
+      }
 
       // Volumen-Shading-Vorab: Mitte und Halbweite für die per-Spalten-Vignette
       const spriteCenterX = (drawStartX + drawEndX) / 2;
@@ -1400,6 +1459,9 @@ export class Renderer {
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       if (dist > chaseRange) continue;
+
+      // Bei Sicht zum Spieler die Blickrichtung mitführen (außer beim Sterben).
+      sprite.facingAngle = Math.atan2(dy, dx);
 
       if (dist < attackRange) {
         // Angriff wenn nah genug
