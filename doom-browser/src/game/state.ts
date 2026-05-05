@@ -19,9 +19,13 @@ export enum GameState {
  * Game State Manager: Steuert Zustandstransitionen und rendert entsprechende Screens.
  */
 export class GameStateManager {
-  private state: GameState = GameState.MENU;
+  private state: GameState;
+  public isLoading: boolean = false;
+  public pendingLevel: number = 0;
+  public loadingProgress: number = 0;
 
-  constructor() {
+  constructor(initialState: GameState = GameState.MENU) {
+    this.state = initialState;
     // Enter-Taste: Menu starten / Neustart
     window.addEventListener('keydown', (e: KeyboardEvent) => {
       if (this.state === GameState.LOADING) return;
@@ -47,6 +51,12 @@ export class GameStateManager {
 
   public transitionTo(newState: GameState): void {
     this.state = newState;
+  }
+
+  public resetGame(): void {
+    this.isLoading = false;
+    this.pendingLevel = 0;
+    this.loadingProgress = 0;
   }
 
  /**

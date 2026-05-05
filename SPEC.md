@@ -1,161 +1,180 @@
-Now I have everything I need. Here is the spec:
+Now I'll write the detailed implementation specification based on my analysis of the codebase.
 
 ---
+
+## Automated Test Infrastructure Implementation Spec
 
 ## Problem
 
-`Renderer.advanceStage()` (`renderer.ts:493–518`) calls `generateLevel()` synchronously and immediately commits the result in the same animation frame. There is no visual transition, no input blocking, and no feedback. At higher stages the generator can retry internally up to 50 times, which can cause a visible stutter. The exit trigger at `renderer.ts:1933–1940` fires during the normal game-loop update path, so the level swap happens mid-frame with no ceremony. Stage 1 is correctly generated synchronously at startup in `main.ts` before the game loop runs; only stage transitions (stage 2, 3, …) need the loading screen.
-
----
+The codebase lacks automated test coverage, making it difficult to verify critical game systems and detect regressions. Recent features—lazy level generation with loading screens and dead NPC corpse persistence—require test validation to ensure determinism, proper state transitions, and collision behavior. Without automated tests, manual verification is the only quality gate.
 
 ## Files to touch
 
-| File | What changes |
-|---|---|
-| `src/game/state.ts` | Add `LOADING = 'loading'` to `GameState`; add `renderLoading(ctx, w, h, progress, stage)` method |
-| `src/engine/renderer.ts` | Replace `advanceStage()` with async `beginLevelTransition()`; add loading-state fields; guard game-loop update path |
-| `src/main.ts` | No change — stage 1 generation before the loop is unaffected |
-| `src/engine/level-gen.ts` | No change — already deterministic via `mulberry32(seed ^ stage * 0x9E3779B9)` |
+### Configuration & Framework
+- `package.json` — add Vitest dependencies and npm scripts
+- `vite.config.ts` — add Vitest config
 
----
+### Test Directories (new)
+- `src/engine/__tests__/level-gen.test.ts` — level generation tests
+- `src/engine/__tests__/sprite.test.ts` — sprite lifecycle and corpse persistence
+- `src/game/__tests__/state.test.ts` — state machine transitions
+- `src/__tests__/utils/mocks.ts` — mock objects (player, renderer, sound manager)
+- `src/__tests__/utils/fixtures.ts` — test helpers and fixtures
+- `src/__tests__/utils/test-levels.ts` — factory for creating test levels
+
+### Configuration Files
+- `vitest.config.ts` — Vitest setup and configuration
+- `.nycrc.json` — coverage reporting config (optional, for c8)
 
 ## Approach
 
-### 1. Add `LOADING` state — `src/game/state.ts`
+### 1. Framework Setup
+- Install Vitest (`npm install -D vitest @vitest/ui`) compatible with existing Vite config
+- Update `package.json` with `test`, `test:watch`, and `test:coverage` scripts
+- Create `vitest.config.ts` extending the existing Vite config
+- Configure coverage reporting with c8 to target 80% for new/critical modules
 
-Add `LOADING = 'loading'` to the `GameState` enum between `PAUSED` and `DEAD`.
+### 2. Test Utilities
+Create reusable test infrastructure in `src/__tests__/utils/`:
+- **mocks.ts**: Implement mock classes for GameStateManager, Renderer, Weapon, and SoundManager with minimal stub behavior
+- **fixtures.ts**: Helper functions for creating test players, setting up game state, and clearing module state between tests
+- **test-levels.ts**: Factory function `createTestLevel(seed, stage, overrides)` to generate levels with controlled parameters; enables fixture-level level manipulation for specific test scenarios
 
-Add a new public method `renderLoading(ctx, w, h, progress: number, stage: number)`:
-- Full black background: `ctx.fillStyle = '#000'; ctx.fillRect(0, 0, w, h)`
-- Centered "STAGE N" text at `h/2 - 70`, bold 40px monospace, white
-- Rotating arc spinner at `h/2` center: radius 32px, white stroke lineWidth 4, arc from `t` to `t + 1.8π` where `t = (Date.now() / 300) % (2π)` — draw each frame from caller
-- "Loading… XX%" text at `h/2 + 60`, 18px monospace, `#aaa`, where XX is `Math.floor(progress * 100)`
-- Progress bar: 220px wide, 10px tall, centered at `h/2 + 90`; grey background `#333`, red fill `#cc0000` to `progress * 220` width, 2px white border
+### 3. Level Generation Tests (`src/engine/__tests__/level-gen.test.ts`)
+**Determinism Test**
+- Same `seed` + `stage` must always produce identical level layout, spawn position, exit position, and enemy placements (byte-for-byte tile map comparison)
+- Verify spawn, entrance, exit, keycard, enemy, ammo, and health positions are identical across 3+ runs
 
-The `GameStateManager.render()` switch must fall through to `renderLoading` when state is `LOADING`; the caller (Renderer) passes `progress` and `stage` as extra arguments, which `render()` should accept as optional params and forward.
+**Level Validation Test**
+- All tiles in `level.map` must be valid TILE constants (0–5)
+- Spawn position must be on a FLOOR tile within room 0
+- Exit door must exist and be on perimeter of exit room
+- Keycard must be reachable without blue door
+- All enemy, ammo, health positions must be on FLOOR tiles
+- Width/height must be in range [16, 24] per stage constraints
 
-### 2. Loading-state fields — `src/engine/renderer.ts`
+**Multi-Stage Differentiation Test**
+- Stage 1, 2, 3 with same seed must produce different room counts, enemy counts, and map layouts
+- Higher stages must have more rooms and enemies than stage 1
 
-Add to the `Renderer` class:
+### 4. Sprite System Tests (`src/engine/__tests__/sprite.test.ts`)
+**Lifecycle Test: Alive → Dying → Dead**
+- New sprite: `isAlive=true`, `isDying=false`, `isDead=false`
+- After receiving damage to `health=0`: `isAlive=false`, `isDying=true`, `isDead=false`, `deathTimer=0`
+- After `deathTimer >= deathDuration` (0.45s): `isDead=true`, `isAlive=false`, `isDying=false`
+- Verify `update(deltaTime)` advances `deathTimer` correctly
 
-```ts
-private isLoading: boolean = false;
-private loadingProgress: number = 0;         // 0.0 → 1.0
-private pendingLevel: Level | null = null;
-private loadingTargetStage: number = 0;
-private loadingAnimStart: number = 0;
-private readonly LOAD_ANIM_MS = 700;         // progress bar animation duration
+**Corpse Persistence Test**
+- Dead sprites remain in the `sprites` array after death animation completes
+- Dead sprites are **not** removed or spliced
+- `isDead=true` distinguishes corpses from alive/dying sprites
+- Multiple corpses can coexist in the array
+
+**Collision Exclusion Test**
+- Dead sprites (`isDead=true`) are excluded from AI chase/attack calculations
+- Dead sprites do not participate in collision checks with the player or other entities
+- Verify that enemy AI pathfinding/target selection skips dead enemies
+
+### 5. State Machine Tests (`src/game/__tests__/state.test.ts`)
+**LOADING State Test**
+- `gameState === GameState.LOADING` blocks input (no Enter/Space transition)
+- `renderLoading()` is called, displaying progress bar and stage number
+- Input events (Enter, Space, Escape) are ignored while loading
+
+**LOADING → PLAYING Transition Test**
+- After `isLoading=false` and loading progress completes, transition to PLAYING
+- Input (Enter/Space) triggers transition from MENU → PLAYING
+- Verify `render()` doesn't show loading screen after transition
+
+**DEAD/WIN → MENU Transition Test**
+- DEAD + Enter/Space → MENU (no loading screen shown)
+- WIN + Enter/Space → MENU (no loading screen shown)
+- Verify `render()` skips loading screen render in these transitions
+
+**resetGame() Clears Loading State Test**
+- Call `resetGame()` after a level completes
+- Verify `isLoading=false`, `pendingLevel=null`, `loadingProgress=0`
+- Subsequent level load triggers LOADING state with fresh progress counter
+
+### 6. Test Utilities Module Design
+**mocks.ts** exports:
+```typescript
+class MockRenderer { /* stubs: render(), start(), dispose() */ }
+class MockGameStateManager { /* stubs: getState(), transitionTo(), render() */ }
+class MockSoundManager { /* stubs: playSound(), stop() */ }
+class MockWeapon { /* stubs: fire(), reload(), update() */ }
 ```
 
-### 3. Replace `advanceStage()` with `beginLevelTransition()` — `src/engine/renderer.ts`
-
-Delete the existing `advanceStage()` body. Replace with:
-
-```
-private beginLevelTransition(): void {
-  if (this.isLoading) return;                        // guard double-trigger
-  this.isLoading = true;
-  this.loadingTargetStage = this.stage + 1;
-  this.loadingProgress = 0;
-  this.gameStateManager.transitionTo(GameState.LOADING);
-
-  // Defer generation by one setTimeout so the LOADING frame paints first.
-  setTimeout(() => {
-    this.pendingLevel = generateLevel(this.baseSeed, this.loadingTargetStage);
-    this.loadingAnimStart = performance.now();
-  }, 0);
-}
+**fixtures.ts** exports:
+```typescript
+function createTestPlayer(x?: number, y?: number): Player
+function createTestGameState(): GameStateManager
+function resetGameState(): void
+function advanceFrame(renderer: Renderer, deltaTime: number): void
 ```
 
-The `setTimeout(..., 0)` ensures at least one `requestAnimationFrame` fires (and paints the black loading screen) before the synchronous `generateLevel` call blocks the thread. `generateLevel` takes <30ms even at max stage, so the single-frame gap is sufficient.
-
-### 4. Main game-loop integration — `src/engine/renderer.ts`
-
-In the main render/update method (the `requestAnimationFrame` callback):
-
-**When `gameState === GameState.LOADING`:**
-- Skip all gameplay: no `updatePlayer()`, no enemy AI, no `worldState.updateWorld()`, no shooting
-- Render loading screen: black fill + call `gameStateManager.render(ctx, w, h, this.loadingProgress, this.loadingTargetStage)`
-- If `this.pendingLevel !== null` (generation done):
-  - Compute `elapsed = performance.now() - this.loadingAnimStart`
-  - `this.loadingProgress = Math.min(elapsed / this.LOAD_ANIM_MS, 1.0)`
-  - When `this.loadingProgress >= 1.0`:
-    - Apply the level (see §5 below)
-    - `this.isLoading = false; this.pendingLevel = null`
-    - `this.gameStateManager.transitionTo(GameState.PLAYING)`
-- Return early (do not execute raycasting or sprite rendering)
-
-**When `gameState === GameState.PLAYING` and `this.isLoading`:**
-- This gap cannot occur (LOADING state is held until `isLoading` is cleared), but add the guard defensively.
-
-**Exit door trigger (existing code at `renderer.ts:1933`):**
-- Replace `this.advanceStage()` with `this.beginLevelTransition()`
-- Keep all surrounding conditions unchanged (hasKeycard, distance check, edge trigger)
-
-### 5. Applying the pending level
-
-Extract the install logic from `advanceStage()` into a private `installLevel(level: Level)`:
-
-```
-worldState.loadLevel(level);
-this.currentLevel = level;
-this.stage = this.loadingTargetStage;
-this.player.setPosition(level.spawn.x, level.spawn.y);
-this.player.dirX = level.spawn.dirX;
-this.player.dirY = level.spawn.dirY;
-this.player.planeX = -level.spawn.dirY * 0.66;
-this.player.planeY = level.spawn.dirX * 0.66;
-this.hasKeycard = false;
-this.keycardPickupMessage = 0;
-this.doorMessage = '';
-this.doorMessageTimer = 0;
-this.sprites = [];
-this.initializeSprites();
-this.stageBannerTimer = this.stageBannerDuration;
-this.soundManager.play(SoundType.DOOR);
+**test-levels.ts** exports:
+```typescript
+function createTestLevel(seed: number, stage: number, overrides?: Partial<Level>): Level
 ```
 
-This is the same logic as the current `advanceStage()` — just deferred to when `loadingProgress >= 1.0`.
-
-### 6. Input blocking
-
-`updatePlayer()` and `handleShoot()` must not execute while `isLoading`. The existing check `if (gameState !== GameState.PLAYING) return` already gates `updatePlayer` — because state is `LOADING`, not `PLAYING`, during the transition. The mousedown listener for shooting also checks `gameState === GameState.PLAYING` (`renderer.ts:141`), so it is blocked automatically. No additional changes needed in `input.ts`.
-
-`GameStateManager`'s keydown listener must ignore LOADING: add `|| this.state === GameState.LOADING` to the guard conditions for Enter, Space, and Escape so they cannot interrupt a transition.
-
-### 7. Determinism — no changes required
-
-`generateLevel(baseSeed, stage)` seeds its PRNG with `mulberry32(baseSeed ^ (stage * 0x9E3779B9))`. `baseSeed` is fixed for the session at `main.ts:19`. Every level is fully determined by `(baseSeed, stage)`. No new state is introduced.
-
----
+### 7. CI/CD Integration
+- Add `npm test` script: `vitest run` (single run, exit with status)
+- Add `npm test:watch` script: `vitest` (watch mode for local development)
+- Add `npm test:coverage` script: `vitest run --coverage` (c8-based HTML report)
+- Configure `.nycrc.json` to target 80% coverage for `src/engine/sprite.ts`, `src/engine/level-gen.ts`, and `src/game/state.ts`
+- Suppress coverage for generated/procedural code: `src/engine/textures.ts`, `src/engine/sprite-textures.ts`
 
 ## Acceptance criteria
 
-1. Pressing E at the exit door (keycard held, distance < 1.5 tiles) immediately renders a black loading screen — no frame shows the new level before the loading screen.
-2. Loading screen displays: correct "STAGE N" number, a continuously rotating spinner arc, "Loading… XX%" text, and a red progress bar that fills left-to-right from 0% to 100%.
-3. The progress bar reaches 100% and the new game world is not visible until the bar completes.
-4. No player movement, camera rotation, shooting, or enemy AI executes while the loading screen is active.
-5. After transition, the player is positioned at `level.spawn` with the correct facing direction.
-6. All NPCs, items, ammo, health, secret health, and decor sprites defined in the new `Level` object are present and interactable.
-7. `hasKeycard` is `false` at the start of each new stage; the exit door cannot be opened without collecting the new level's keycard.
-8. The "STAGE N" banner appears after the loading screen clears (using the existing `stageBannerTimer` path).
-9. ESC keypresses during the loading screen are ignored; no state corruption occurs.
-10. Giving the same `baseSeed` produces identical level layouts for every stage across two runs.
-11. The total time from E-press to playable game (loading screen + generation + animation) is ≤ 2 seconds on a mid-range machine.
-12. DEAD → MENU and WIN → MENU flows do not show a loading screen.
-
----
+1. ✓ Vitest is installed and `npm test` runs all tests without error
+2. ✓ Level generation determinism test passes (same seed always produces identical layout)
+3. ✓ Level validation test passes (all levels have valid tiles, spawn in room 0, exit exists, keycard reachable)
+4. ✓ Multi-stage differentiation test passes (stages 1–3 produce different layouts)
+5. ✓ Sprite lifecycle test passes (alive → dying → dead state transitions verified)
+6. ✓ Corpse persistence test passes (dead sprites remain in array, not spliced)
+7. ✓ Collision exclusion test passes (dead sprites excluded from AI and collision)
+8. ✓ LOADING state test passes (input blocked, progress bar rendered)
+9. ✓ State transition tests pass (LOADING→PLAYING, DEAD→MENU, WIN→MENU verified)
+10. ✓ resetGame() clears loading state (isLoading, pendingLevel, loadingProgress reset to defaults)
+11. ✓ Mock objects (renderer, sound manager, weapon) are reusable across tests
+12. ✓ Test fixtures enable common scenarios without code duplication
+13. ✓ Coverage report shows ≥80% for sprite.ts, level-gen.ts, state.ts
+14. ✓ `npm test:watch` runs tests in watch mode for local development
+15. ✓ `npm test:coverage` generates HTML coverage report in `coverage/` directory
 
 ## Test plan
 
-1. **Basic transition** — Start, collect keycard, press E at exit door. Verify: (a) screen cuts to black immediately, (b) loading screen with correct stage number appears, (c) spinner rotates, (d) progress bar fills to 100%, (e) game world appears after bar completes.
-2. **Progress animation** — Time the progress bar from appearance to 100% with a stopwatch. Must take approximately 700ms and not jump instantly.
-3. **Input blocking** — During loading screen, rapidly press WASD and move mouse. After transition confirm player is at spawn (not at pre-load position), and no shots were fired.
-4. **Keycard reset** — After stage transition, approach exit door without keycard. Confirm "Locked" message appears; the E key does not advance to the next stage.
-5. **Multi-stage chain** — Play stages 1 → 2 → 3 in sequence. Each transition must show the correct stage number on the loading screen.
-6. **ESC during loading** — Press ESC while loading screen is visible. Confirm no crash, no pause overlay, and the loading screen completes normally.
-7. **Determinism** — Temporarily `console.log(baseSeed)` in `main.ts`. Run with that seed twice (hardcode it). Compare level layouts (minimap, keycard position, exit door position) for stages 1, 2, and 3 — they must be identical.
-8. **Dead/win no loading** — Die during gameplay → DEAD screen appears (no loading screen). WIN condition (should not occur mid-transition) — confirm no loading screen.
-9. **Double-trigger guard** — Rapidly double-tap E at the exit door. Confirm only one level transition occurs (the `isLoading` guard prevents re-entry).
-10. **Performance at high stage** — Fast-forward to stage 10+ by temporarily hardcoding `loadingTargetStage`. Measure wall-clock time from E-press to playable. Must be < 2000ms.
-11. **Spinner continuity** — During loading screen, confirm the spinner arc rotates smoothly with no pause during the `generateLevel` call (verify it resumes immediately after the setTimeout fires).
+### Phase 1: Framework & Utilities (1–2 hours)
+1. Install Vitest and configure `vitest.config.ts`
+2. Update `package.json` with test scripts
+3. Implement mock objects in `src/__tests__/utils/mocks.ts`
+4. Implement test fixtures in `src/__tests__/utils/fixtures.ts`
+5. Implement test level factory in `src/__tests__/utils/test-levels.ts`
+
+### Phase 2: Level Generation Tests (2–3 hours)
+1. Write determinism test: generate level 5× with same seed, compare tile maps and entity positions
+2. Write validation test: check all tiles, spawn/exit/keycard placement, reachability
+3. Write multi-stage test: generate stages 1–3 with same seed, verify increasing complexity
+
+### Phase 3: Sprite System Tests (1.5–2 hours)
+1. Write lifecycle test: create sprite, apply damage, advance time, verify state flags
+2. Write corpse persistence test: kill sprite, verify remains in array, not spliced
+3. Write collision exclusion test: add dead sprite to scene, verify skipped by AI and collision checks
+
+### Phase 4: State Machine Tests (1.5–2 hours)
+1. Write LOADING state test: transition to LOADING, verify input blocked and progress bar rendered
+2. Write transition tests: LOADING→PLAYING, DEAD→MENU, WIN→MENU with input verification
+3. Write resetGame() test: verify loading state cleared to defaults
+
+### Phase 5: Coverage & Polish (1 hour)
+1. Run `npm test:coverage` and verify ≥80% on critical modules
+2. Add any missing edge-case tests (boundary conditions, state edge cases)
+3. Document test-running instructions in README
+
+### Execution Timeline
+- **Total effort**: 7–10 hours
+- **Recommended order**: Utilities → Level Gen → Sprite → State Machine → Coverage → Polish
+- **Parallel work**: Can begin Phase 3 while Phase 2 is in progress if developers are available
+
+---

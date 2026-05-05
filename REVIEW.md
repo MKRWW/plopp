@@ -2,39 +2,43 @@
 
 | AC | Status | Notes |
 |---|---|---|
-| 1 | ✓ | Exit trigger calls `beginLevelTransition()` (line 1975), which immediately sets state to LOADING |
-| 2 | ✓ | `renderLoading()` renders all elements: "STAGE N" (line 2186), spinner (lines 2191–2199), "Loading… XX%" (lines 2202–2204), progress bar (lines 2206–2216) |
-| 3 | ✓ | Progress capped to 1.0 (line 1884); PLAYING only entered when progress ≥ 1.0 (line 1887); game renders only in `else` block (line 2012) |
-| 4 | ✓ | `updatePlayer()` skipped when `gameState !== PLAYING` (line 1897); LOADING state prevents execution (line 1880) |
-| 5 | ✓ | `installLevel()` sets position from `level.spawn` (lines 519–523) with correct facing vectors |
-| 6 | ✓ | `installLevel()` calls `worldState.loadLevel()` and `initializeSprites()` (lines 517, 531) |
-| 7 | ✓ | `hasKeycard = false` set in `installLevel()` (line 525) when transition completes |
-| 8 | ✓ | `stageBannerTimer` set in `installLevel()` (line 530); displays after loading clears |
-| 9 | ✓ | Keydown handler returns early if `state === LOADING` (line 27) |
-| 10 | ✓ | No changes to level-gen.ts; determinism unaffected |
-| 11 | ✓ | setTimeout defers generation (line 511); 700ms animation (line 107) allows rendering |
-| 12 | ✓ | `beginLevelTransition()` only called at exit door; DEAD/WIN flows unaffected |
+| 1 | ✓ | Vitest installed with npm scripts (test, test:watch, test:coverage) |
+| 2 | ✓ | level-gen.test.ts contains determinism tests (302 lines, 5-run comparison) |
+| 3 | ✓ | Level validation tests verify tiles 0-5, spawn/exit/keycard placement |
+| 4 | ✓ | Multi-stage differentiation tests stages 1-3 with increasing complexity |
+| 5 | ✓ | sprite.test.ts has alive → dying → dead lifecycle verification |
+| 6 | ✓ | Corpse persistence tests verify isDead sprites remain in array |
+| 7 | ✓ | Collision exclusion tests filter dead sprites from AI/collision logic |
+| 8 | ✓ | LOADING state tests verify input blocking and renderLoading() calls |
+| 9 | ✓ | State transition tests cover LOADING→PLAYING, DEAD→MENU, WIN→MENU |
+| 10 | ✓ | resetGame() method added to state.ts and tested (isLoading, pendingLevel, loadingProgress cleared) |
+| 11 | ✓ | Mock classes implemented (MockRenderer, MockGameStateManager, MockSoundManager, MockWeapon) |
+| 12 | ✓ | Test fixtures (createTestPlayer, createTestSprites, createDeadEnemySprite) present |
+| 13 | ⚠️ | Coverage config present (80% threshold for sprite.ts, level-gen.ts, state.ts) but unverified |
+| 14 | ✓ | test:watch script present in package.json |
+| 15 | ✓ | test:coverage script present; coverage config targets HTML report in coverage/ |
 
 ## Bugs
 
-None. Code will execute without runtime errors and meet all functional requirements.
+1. **fixtures.ts:11-12** — Import paths are incorrect (too shallow by one level). `'../player/player'` should be `'../../player/player'` and `'../engine/sprite'` should be `'../../engine/sprite'`. fixtures.ts is in `src/__tests__/utils/`, so parent imports need two `../`.
+
+2. **fixtures.ts:14,16** — Circular/self-referential require pattern: `require('./fixtures')` on line 16 imports from the same file (inside `createTestSprites()`). This will cause circular dependency failures at runtime.
+
+3. **mocks.ts:140** — Syntax error in function parameter: `y: 3` is invalid TypeScript. Should be `y: number = 3`.
+
+4. **setup.ts:16,19** — Duplicate `createGain()` method definition in AudioContext mock. Second definition (line 19) shadows the first (line 16), though the signature differs. Should merge or remove duplicate.
 
 ## Security concerns
 
-None identified. No DOM manipulation with user input; canvas-only rendering; no external data sources.
+None identified. Test-only code with no external dependencies or user input vectors.
 
 ## Style
 
-1. **Line 2010**: Passes `this.weapon.health` to `gameStateManager.render()` during LOADING, but spec specifies only `(ctx, w, h, progress, stage)`. The extra parameter is optional and unused by `renderLoading()`, but represents a deviation from the spec signature.
-
-2. **Line 519**: Uses `this.stage = level.stage` instead of spec's explicit `this.stage = this.loadingTargetStage` (line 102 of SPEC.md). If `level.stage` is guaranteed to equal `this.loadingTargetStage`, this is functionally equivalent but not per specification.
-
-3. **Line 56**: Parameters `_loadingProgress` and `_loadingStage` prefixed with underscore suggest they're unused, but they ARE used in the LOADING case (line 2068). Naming is misleading.
-
-4. **Lines 1880–1888 and elsewhere**: Spec line 88–89 requests a defensive guard for the gap where `gameState === PLAYING && this.isLoading`. No such guard is present. (Spec notes the gap cannot occur, but asks for defensive code anyway.)
-
-5. **Line 497**: Comment in German. Consistent with codebase, not a violation, but stylistically different from typical English pattern in similar code.
+- Inconsistent import patterns: ES6 `import` statements mixed with `require()` calls (fixtures.ts). Prefer uniform ES6.
+- No explicit error handling in test setup (setup.ts), but acceptable for test infrastructure.
+- Missing `beforeEach` hooks in some test suites (e.g., sprite.test.ts, state.test.ts) that could benefit from sprite/manager reset between tests for isolation.
+- Package.json structure changed: `dependencies` field added but left empty; `canvas` moved to devDependencies alongside test tools. Verify this is intentional (canvas should likely remain optional peer dependency for jsdom).
 
 ## Verdict
 
-**APPROVE** — Implementation meets all 12 acceptance criteria. Minor spec deviations (parameter passing, stage assignment strategy, missing defensive guard) do not affect functionality or test outcomes. Code is structurally sound, input blocking is comprehensive (exceeds spec), and loading screen rendering is correct. Recommend addressing the parameter-naming underscore confusion and the `level.stage` vs. `this.loadingTargetStage` choice for future clarity.
+**REQUEST_CHANGES** — Import paths in fixtures.ts are incorrect (path depth), circular require pattern will fail at runtime, AudioContext mock has duplicate method, and mocks.ts has a syntax error. These are blockers preventing test execution.
