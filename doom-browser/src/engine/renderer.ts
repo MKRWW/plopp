@@ -1,5 +1,5 @@
 import { Player } from '../player/player';
-import { WORLD_MAP, MAP_WIDTH, MAP_HEIGHT, worldState, InteractionResult, TILE } from './world';
+import { MAP_WIDTH, MAP_HEIGHT, worldState, InteractionResult } from './world';
 import { ZBuffer } from './zbuffer';
 import { InputHandler, pointerLockSupported } from '../player/input';
 import { TextureManager, Texture } from './textures';
@@ -83,6 +83,9 @@ export class Renderer {
   private soundManager: SoundManager;
   private stepTimer: number = 0;       // Timer für Schritt-Sounds
   private readonly stepInterval: number = 0.35; // Schritt alle 350ms beim Laufen
+
+  // Edge-Triggering für Interaktion (E-Taste)
+  private wasInteractPressedLastFrame: boolean = false;
 
   constructor(player: Player, gameStateManager: GameStateManager, weapon: Weapon) {
     this.player = player;
@@ -761,11 +764,14 @@ export class Renderer {
       }
     }
 
-    // Item-Pickup und Tür-Interaktion mit E-Taste
-    if (this.input.isKey('KeyE')) {
+    // Item-Pickup und Tür-Interaktion mit E-Taste (Edge-Triggered)
+    const isInteractPressed = this.input.isKey('KeyE');
+    if (isInteractPressed && !this.wasInteractPressedLastFrame) {
+      // E-Taste wurde gerade neu gedrückt → Interaktion ausführen
       this.checkItemPickup();
       this.checkDoorInteraction();
     }
+    this.wasInteractPressedLastFrame = isInteractPressed;
   }
 
   /**
@@ -1060,13 +1066,18 @@ export class Renderer {
       // Destination-Index in der Spalte
       const dstIdx = y * 4;
 
-      // Tür-Clip: Wenn y > doorClipY, dann ist dieser Bereich bereits "geöffnet"
+      // Tür-Clip: Wenn y >= doorClipY, dann ist dieser Bereich bereits "geöffnet"
       if (doorProgress > 0 && doorProgress < 1 && y >= doorClipY) {
-        // Dieser Bereich ist bereits geöffnet → transparent (Boden sichtbar)
-        colPixels[dstIdx] = 0;
-        colPixels[dstIdx + 1] = 0;
-        colPixels[dstIdx + 2] = 0;
-        colPixels[dstIdx + 3] = 0;
+        // Scanline-Illusion: abwechselnd verdunkelte/hellere Streifen
+        // simulieren das Sichtbarwerden des Bodens ohne Transparenz
+        const isScanline = (y % 4) < 2;
+        const scanlineDarken = isScanline ? 0.35 : 0.65;
+        // Source-Pixel aus Textur lesen
+        const srcIdx = (texY * texWidth + texX) * 4;
+        colPixels[dstIdx]     = texData[srcIdx] * brightness * scanlineDarken;
+        colPixels[dstIdx + 1] = texData[srcIdx + 1] * brightness * scanlineDarken;
+        colPixels[dstIdx + 2] = texData[srcIdx + 2] * brightness * scanlineDarken;
+        colPixels[dstIdx + 3] = 255; // Immer undurchsichtig
         continue;
       }
 

@@ -1,4 +1,4 @@
-import { WORLD_MAP, MAP_WIDTH, MAP_HEIGHT, worldState } from './world';
+import { MAP_WIDTH, MAP_HEIGHT, worldState } from './world';
 
 /**
  * Kollisions-Utilities für grid-basierte Wand-Kollision.
