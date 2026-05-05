@@ -1014,10 +1014,12 @@ export class Renderer {
       }
       wallX -= Math.floor(wallX); // Auf 0.0-1.0 normieren
 
-      // U-Coordinate (0 = links der Textur, 1 = rechts)
+      // U-Coordinate (0 = links der Textur, 1 = rechts).
+      // Flip-Konvention so gewählt, dass die natürliche Textur-Orientierung
+      // (Texte/Asymmetrien wie das "EXIT"-Schild) korrekt herum dargestellt wird.
       let u = wallX;
-      if ((side === 0 && rayDirX > 0) || (side === 1 && rayDirY < 0)) {
-        u = 1.0 - u; // Spiegeln für korrekte Textur-Richtung
+      if ((side === 0 && rayDirX < 0) || (side === 1 && rayDirY > 0)) {
+        u = 1.0 - u;
       }
 
       // Textur holen
