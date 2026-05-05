@@ -31,7 +31,8 @@ export class TextureManager {
 
   /**
    * Initialisiert den Textur-Manager und generiert alle Texturen.
-   * Wandtyp 1 = Dunkler Stein, Wandtyp 2 = Metall/Gitter.
+   * Wandtyp 1 = Dunkler Stein, Wandtyp 2 = Metall/Gitter,
+   * Wandtyp 3 = Exit-Tür, Wandtyp 4 = Blue Key Door, Wandtyp 5 = Secret Wall.
    */
   public initialize(): void {
     if (this.initialized) return;
@@ -39,6 +40,8 @@ export class TextureManager {
     this.textures.set(1, this.generateDarkStoneTexture());
     this.textures.set(2, this.generateMetalGrateTexture());
     this.textures.set(3, this.generateExitDoorTexture());
+    this.textures.set(4, this.generateBlueKeyDoorTexture());
+    this.textures.set(5, this.generateSecretWallTexture());
     this.floorTexture = this.generateFloorTileTexture();
     this.ceilingTexture = this.generateWoodPanelTexture();
 
@@ -459,6 +462,161 @@ export class TextureManager {
     const imageData = ctx.getImageData(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
     for (let i = 0; i < imageData.data.length; i += 4) {
       const noise = (Math.random() - 0.5) * 10;
+      imageData.data[i] = Math.max(0, Math.min(255, imageData.data[i] + noise));
+      imageData.data[i + 1] = Math.max(0, Math.min(255, imageData.data[i + 1] + noise));
+      imageData.data[i + 2] = Math.max(0, Math.min(255, imageData.data[i + 2] + noise));
+    }
+    ctx.putImageData(imageData, 0, 0);
+
+    return {
+      canvas,
+      width: TEXTURE_SIZE,
+      height: TEXTURE_SIZE,
+      data: ctx.getImageData(0, 0, TEXTURE_SIZE, TEXTURE_SIZE)
+    };
+  }
+
+  /**
+   * Generiert eine Blue Key Door Textur (Wandtyp 4).
+   * Sci-Fi Metalltür mit blauem Leuchten und Keycard-Symbol.
+   */
+  private generateBlueKeyDoorTexture(): Texture {
+    const canvas = document.createElement('canvas');
+    canvas.width = TEXTURE_SIZE;
+    canvas.height = TEXTURE_SIZE;
+    const ctx = canvas.getContext('2d')!;
+
+    // Dunkler Metall-Basis
+    ctx.fillStyle = '#2a2a3a';
+    ctx.fillRect(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
+
+    // Tür-Rahmen
+    ctx.fillStyle = '#4a4a5a';
+    ctx.fillRect(4, 4, TEXTURE_SIZE - 8, TEXTURE_SIZE - 8);
+    ctx.fillStyle = '#2a2a3a';
+    ctx.fillRect(8, 8, TEXTURE_SIZE - 16, TEXTURE_SIZE - 16);
+
+    // Blaues Leuchten (Keycard-Erkennung)
+    const glowGrad = ctx.createRadialGradient(
+      TEXTURE_SIZE / 2, TEXTURE_SIZE / 2, 4,
+      TEXTURE_SIZE / 2, TEXTURE_SIZE / 2, 40
+    );
+    glowGrad.addColorStop(0, 'rgba(50, 100, 255, 0.5)');
+    glowGrad.addColorStop(0.5, 'rgba(50, 100, 255, 0.2)');
+    glowGrad.addColorStop(1, 'rgba(50, 100, 255, 0)');
+    ctx.fillStyle = glowGrad;
+    ctx.fillRect(8, 8, TEXTURE_SIZE - 16, TEXTURE_SIZE - 16);
+
+    // Keycard-Slot (kleiner Schlitz)
+    ctx.fillStyle = '#111';
+    ctx.fillRect(TEXTURE_SIZE / 2 - 12, TEXTURE_SIZE / 2 + 10, 24, 6);
+    ctx.fillStyle = '#33f';
+    ctx.fillRect(TEXTURE_SIZE / 2 - 10, TEXTURE_SIZE / 2 + 11, 20, 4);
+
+    // "KEY" Text
+    ctx.fillStyle = '#5af';
+    ctx.font = 'bold 20px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = '#5af';
+    ctx.shadowBlur = 8;
+    ctx.fillText('KEY', TEXTURE_SIZE / 2, TEXTURE_SIZE / 2 - 10);
+    ctx.shadowBlur = 0;
+
+    // Rauschen
+    const imageData = ctx.getImageData(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
+    for (let i = 0; i < imageData.data.length; i += 4) {
+      const noise = (Math.random() - 0.5) * 10;
+      imageData.data[i] = Math.max(0, Math.min(255, imageData.data[i] + noise));
+      imageData.data[i + 1] = Math.max(0, Math.min(255, imageData.data[i + 1] + noise));
+      imageData.data[i + 2] = Math.max(0, Math.min(255, imageData.data[i + 2] + noise));
+    }
+    ctx.putImageData(imageData, 0, 0);
+
+    return {
+      canvas,
+      width: TEXTURE_SIZE,
+      height: TEXTURE_SIZE,
+      data: ctx.getImageData(0, 0, TEXTURE_SIZE, TEXTURE_SIZE)
+    };
+  }
+
+  /**
+   * Generiert eine Secret Wall Textur (Wandtyp 5).
+   * Sieht aus wie normale Steinwand (Typ 1), aber mit subtiler dunklerer Textur
+   * und kaum sichtbaren Rissen — nur beim genau Hinschauen erkennbar.
+   */
+  private generateSecretWallTexture(): Texture {
+    const canvas = document.createElement('canvas');
+    canvas.width = TEXTURE_SIZE;
+    canvas.height = TEXTURE_SIZE;
+    const ctx = canvas.getContext('2d')!;
+
+    // Dunklerer Stein-Hintergrund (leicht anders als Typ 1)
+    ctx.fillStyle = '#252525';
+    ctx.fillRect(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
+
+    // Stein-Blöcke (ähnlich wie Typ 1, aber dunkler)
+    const stoneW = TEXTURE_SIZE / 2;
+    const stoneH = TEXTURE_SIZE / 2;
+    const mortarW = 3;
+
+    for (let row = 0; row < 2; row++) {
+      for (let col = 0; col < 2; col++) {
+        const x = col * stoneW + mortarW;
+        const y = row * stoneH + mortarW;
+        const w = stoneW - mortarW * 2;
+        const h = stoneH - mortarW * 2;
+
+        // Etwas dunkler als normale Steinwand
+        const base = 30 + Math.random() * 15;
+        const r = base + Math.random() * 8;
+        const g = base + Math.random() * 5;
+        const b = base - Math.random() * 3;
+
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.fillRect(x, y, w, h);
+
+        // Feine Risse
+        for (let i = 0; i < 10; i++) {
+          const cx = x + Math.random() * w;
+          const cy = y + Math.random() * h;
+          const cw = 2 + Math.random() * 6;
+          const ch = 1 + Math.random() * 2;
+          const shade = (Math.random() - 0.5) * 15;
+          ctx.fillStyle = `rgba(${shade > 0 ? 255 : 0},${shade > 0 ? 255 : 0},${shade > 0 ? 255 : 0},${Math.abs(shade) / 100})`;
+          ctx.fillRect(cx, cy, cw, ch);
+        }
+
+        // Schatten an Kanten
+        const shadowGrad = ctx.createLinearGradient(x, y, x + 4, y);
+        shadowGrad.addColorStop(0, 'rgba(0,0,0,0.35)');
+        shadowGrad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = shadowGrad;
+        ctx.fillRect(x, y, 4, h);
+
+        const highlightGrad = ctx.createLinearGradient(x + w, y, x + w - 4, y);
+        highlightGrad.addColorStop(0, 'rgba(0,0,0,0.35)');
+        highlightGrad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = highlightGrad;
+        ctx.fillRect(x + w - 4, y, 4, h);
+      }
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(0, (row + 1) * stoneH - 1, TEXTURE_SIZE, mortarW);
+    }
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(TEXTURE_SIZE / 2 - 1, 0, mortarW, TEXTURE_SIZE);
+
+    // Subtile "geheime" Markierung: kaum sichtbare Kreise
+    ctx.fillStyle = 'rgba(40, 60, 40, 0.08)';
+    ctx.beginPath();
+    ctx.arc(TEXTURE_SIZE / 2, TEXTURE_SIZE / 2, 20, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Rauschen
+    const imageData = ctx.getImageData(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
+    for (let i = 0; i < imageData.data.length; i += 4) {
+      const noise = (Math.random() - 0.5) * 12;
       imageData.data[i] = Math.max(0, Math.min(255, imageData.data[i] + noise));
       imageData.data[i + 1] = Math.max(0, Math.min(255, imageData.data[i + 1] + noise));
       imageData.data[i + 2] = Math.max(0, Math.min(255, imageData.data[i + 2] + noise));

@@ -4,7 +4,7 @@
  */
 
 import { Player } from '../player/player';
-import { WORLD_MAP, MAP_WIDTH, MAP_HEIGHT } from '../engine/world';
+import { WORLD_MAP, MAP_WIDTH, MAP_HEIGHT, worldState, TILE } from '../engine/world';
 import { Sprite, SpriteType } from '../engine/sprite';
 import { positionCollides, PLAYER_RADIUS, ENEMY_RADIUS } from '../engine/collision';
 
@@ -235,17 +235,29 @@ export class Minimap {
   private renderMap(ctx: CanvasRenderingContext2D, tileSize: number): void {
     for (let y = 0; y < MAP_HEIGHT; y++) {
       for (let x = 0; x < MAP_WIDTH; x++) {
-        const tile = WORLD_MAP[y][x];
+        const base = WORLD_MAP[y][x];
         const px = x * tileSize;
         const py = y * tileSize;
 
-        if (tile > 0) {
+        // Türzustände berücksichtigen
+        if (base === TILE.BLUE_KEY_DOOR || base === TILE.SECRET_WALL) {
+          const door = worldState.getDoor(x, y);
+          if (door?.state === 'open') {
+            // Geöffnete Tür = Boden
+            ctx.fillStyle = COLORS.floor;
+          } else if (door?.state === 'opening') {
+            // Öffnende Tür = gelb/orange
+            ctx.fillStyle = '#cc0';
+          } else {
+            // Geschlossene Tür = blau (Blue Key Door) oder grün (Secret Wall)
+            ctx.fillStyle = base === TILE.BLUE_KEY_DOOR ? '#44f' : '#4a4';
+          }
+        } else if (base > 0) {
           ctx.fillStyle = COLORS.wall;
-          ctx.fillRect(px, py, tileSize, tileSize);
         } else {
           ctx.fillStyle = COLORS.floor;
-          ctx.fillRect(px, py, tileSize, tileSize);
         }
+        ctx.fillRect(px, py, tileSize, tileSize);
       }
     }
   }

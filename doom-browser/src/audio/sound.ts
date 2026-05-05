@@ -13,7 +13,8 @@ export enum SoundType {
   ENEMY_DEATH = 'enemyDeath',
   DAMAGE = 'damage',
   PICKUP = 'pickup',
-  STEP = 'step'
+  STEP = 'step',
+  DOOR = 'door'
 }
 
 /**
@@ -171,6 +172,9 @@ export class SoundManager {
         break;
       case SoundType.STEP:
         this.playStep();
+        break;
+      case SoundType.DOOR:
+        this.playDoor();
         break;
     }
   }
@@ -386,5 +390,54 @@ export class SoundManager {
     gain.connect(this.masterGain);
     noise.start(t);
     noise.stop(t + 0.05);
+  }
+
+  /**
+   * Tür-Öffnungs-Sound (mechanisches "Klick" + tiefes "Hum").
+   */
+  private playDoor(): void {
+    if (!this.audioContext || !this.masterGain) return;
+
+    const t = this.audioContext.currentTime;
+
+    // Mechanisches "Klick" (kurzer Burst)
+    const bufferSize = this.audioContext.sampleRate * 0.08;
+    const buffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.2)) * 0.4;
+    }
+    const noise = this.audioContext.createBufferSource();
+    noise.buffer = buffer;
+
+    const bandpass = this.audioContext.createBiquadFilter();
+    bandpass.type = 'bandpass';
+    bandpass.frequency.value = 800;
+    bandpass.Q.value = 1.5;
+
+    const noiseGain = this.audioContext.createGain();
+    noiseGain.gain.setValueAtTime(0.5, t);
+    noiseGain.gain.exponentialRampToValueAtTime(0.01, t + 0.08);
+
+    noise.connect(bandpass);
+    bandpass.connect(noiseGain);
+    noiseGain.connect(this.masterGain);
+    noise.start(t);
+    noise.stop(t + 0.08);
+
+    // Tiefes "Hum" (Tür öffnet sich)
+    const osc = this.audioContext.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(80, t);
+    osc.frequency.linearRampToValueAtTime(120, t + 0.3);
+
+    const oscGain = this.audioContext.createGain();
+    oscGain.gain.setValueAtTime(0.3, t);
+    oscGain.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
+
+    osc.connect(oscGain);
+    oscGain.connect(this.masterGain);
+    osc.start(t);
+    osc.stop(t + 0.4);
   }
 }

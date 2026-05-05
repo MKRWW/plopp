@@ -1,4 +1,4 @@
-import { WORLD_MAP, MAP_WIDTH, MAP_HEIGHT } from './world';
+import { WORLD_MAP, MAP_WIDTH, MAP_HEIGHT, worldState } from './world';
 
 /**
  * Kollisions-Utilities für grid-basierte Wand-Kollision.
@@ -6,6 +6,9 @@ import { WORLD_MAP, MAP_WIDTH, MAP_HEIGHT } from './world';
  * Der Spieler hat einen Kollisions-Radius (~0.25 Tiles), wodurch er nicht
  * komplett in Wände schlüpfen kann. Bewegungen werden achsenseparat geprüft
  * (erst X, dann Y), was "Sliding" an Wänden ermöglicht.
+ * 
+ * WICHTIG: Alle Kollisionsprüfungen nutzen worldState.isSolidTile() statt
+ * direkt WORLD_MAP, um dynamische Türzustände zu berücksichtigen.
  */
 
 /** Radius des Spielers für Kollisionszwecke */
@@ -49,12 +52,13 @@ export function resolveEntityCollision(
 
 /**
  * Prüft, ob das gegebene Grid-Tile eine Wand ist.
+ * Nutzt worldState.isSolidTile() um dynamische Türzustände zu berücksichtigen.
  */
 export function isWall(mapX: number, mapY: number): boolean {
   if (mapX < 0 || mapX >= MAP_WIDTH || mapY < 0 || mapY >= MAP_HEIGHT) {
     return true; // Außerhalb der Karte = Wand
   }
-  return WORLD_MAP[mapY][mapX] > 0;
+  return worldState.isSolidTile(mapX, mapY);
 }
 
 /**

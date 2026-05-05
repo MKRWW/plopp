@@ -1,5 +1,5 @@
 import { Player } from '../player/player';
-import { WORLD_MAP, MAP_WIDTH, MAP_HEIGHT } from './world';
+import { WORLD_MAP, MAP_WIDTH, MAP_HEIGHT, worldState, InteractionResult, TILE } from './world';
 import { ZBuffer } from './zbuffer';
 import { InputHandler, pointerLockSupported } from '../player/input';
 import { TextureManager, Texture } from './textures';
@@ -45,6 +45,11 @@ export class Renderer {
   private hasKeycard: boolean = false;
   private keycardPickupMessage: number = 0;  // timer for pickup message
   private readonly keycardMessageDuration: number = 2.0;
+
+  // Door interaction HUD messages
+  private doorMessage: string = '';
+  private doorMessageTimer: number = 0;
+  private readonly doorMessageDuration: number = 2.0;
 
   // Pause-Overlay
   private pauseOverlay!: HTMLDivElement;
@@ -275,8 +280,8 @@ export class Renderer {
       }
       if (mapX < 0 || mapX >= MAP_WIDTH || mapY < 0 || mapY >= MAP_HEIGHT) {
         hit = 1;
-      } else if (WORLD_MAP[mapY][mapX] > 0) {
-        hit = WORLD_MAP[mapY][mapX];
+      } else if (worldState.isSolidTile(mapX, mapY)) {
+        hit = worldState.getTile(mapX, mapY);
       }
     }
 
@@ -756,9 +761,94 @@ export class Renderer {
       }
     }
 
-    // Item-Pickup mit E-Taste
+    // Item-Pickup und Tür-Interaktion mit E-Taste
     if (this.input.isKey('KeyE')) {
       this.checkItemPickup();
+      this.checkDoorInteraction();
+    }
+  }
+
+  /**
+   * Prüft ob der Spieler eine Tür vor sich aktiviert (E-Taste).
+   * Raycast in Blickrichtung bis zur nächsten Tür.
+   */
+  private checkDoorInteraction(): void {
+    const rayDirX = this.player.dirX;
+    const rayDirY = this.player.dirY;
+
+    let mapX = Math.floor(this.player.x);
+    let mapY = Math.floor(this.player.y);
+    const deltaDistX = Math.abs(1 / rayDirX);
+    const deltaDistY = Math.abs(1 / rayDirY);
+
+    let sideDistX: number, sideDistY: number;
+    if (rayDirX < 0) {
+      sideDistX = (this.player.x - mapX) * deltaDistX;
+    } else {
+      sideDistX = (mapX + 1.0 - this.player.x) * deltaDistX;
+    }
+    if (rayDirY < 0) {
+      sideDistY = (this.player.y - mapY) * deltaDistY;
+    } else {
+      sideDistY = (mapY + 1.0 - this.player.y) * deltaDistY;
+    }
+
+    let stepX: number, stepY: number;
+    if (rayDirX < 0) stepX = -1; else stepX = 1;
+    if (rayDirY < 0) stepY = -1; else stepY = 1;
+
+    let hit = 0;
+    let steps = 0;
+    const maxSteps = 20; // Max. 20 Tiles weit suchen
+
+    while (hit === 0 && steps < maxSteps) {
+      steps++;
+      if (sideDistX < sideDistY) {
+        sideDistX += deltaDistX;
+        mapX += stepX;
+      } else {
+        sideDistY += deltaDistY;
+        mapY += stepY;
+      }
+
+      if (mapX < 0 || mapX >= MAP_WIDTH || mapY < 0 || mapY >= MAP_HEIGHT) break;
+
+      // Prüfe ob es eine Tür ist (4 oder 5)
+      if (worldState.isDoorTile(mapX, mapY)) {
+        // Distanz zum Spieler prüfen (max. 1.5 Tiles)
+        const dist = Math.sqrt(
+          (mapX + 0.5 - this.player.x) ** 2 + (mapY + 0.5 - this.player.y) ** 2
+        );
+        if (dist <= 1.5) {
+          const result = worldState.interactAt(mapX, mapY, this.hasKeycard);
+          this.showDoorMessage(result);
+          return;
+        }
+      }
+    }
+  }
+
+  /**
+   * Zeigt eine HUD-Nachricht für Tür-Interaktionen.
+   */
+  private showDoorMessage(result: InteractionResult): void {
+    switch (result) {
+      case InteractionResult.DOOR_OPENING:
+        this.doorMessage = 'DOOR OPENING';
+        this.doorMessageTimer = this.doorMessageDuration;
+        this.soundManager.play(SoundType.DOOR);
+        break;
+      case InteractionResult.DOOR_LOCKED:
+        this.doorMessage = 'LOCKED: KEYCARD REQUIRED';
+        this.doorMessageTimer = this.doorMessageDuration;
+        this.soundManager.play(SoundType.DOOR);
+        break;
+      case InteractionResult.SECRET_FOUND:
+        this.doorMessage = 'SECRET FOUND!';
+        this.doorMessageTimer = this.doorMessageDuration;
+        this.player.score += 200;
+        this.soundManager.play(SoundType.DOOR);
+        break;
     }
   }
 
@@ -820,11 +910,11 @@ export class Renderer {
           side = 1;
         }
 
-        // Grenzwert-Check
+        // Grenzwert-Check (nutzt dynamischen WorldState für Türen)
         if (mapX < 0 || mapX >= MAP_WIDTH || mapY < 0 || mapY >= MAP_HEIGHT) {
           hit = 1; // Außerhalb der Karte = Wand
-        } else if (WORLD_MAP[mapY][mapX] > 0) {
-          hit = WORLD_MAP[mapY][mapX];
+        } else if (worldState.isSolidTile(mapX, mapY)) {
+          hit = worldState.getTile(mapX, mapY);
         }
       }
 
@@ -1322,6 +1412,22 @@ export class Renderer {
       ctx.fillText('CARD', 20, 25);
     }
 
+    // --- Door Message (Mitte oben) ---
+    if (this.doorMessageTimer > 0) {
+      const alpha = Math.min(1, this.doorMessageTimer / 0.5);
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 20px monospace';
+      let msgColor = '#ff0';
+      if (this.doorMessage.includes('LOCKED')) msgColor = '#f44';
+      else if (this.doorMessage.includes('SECRET')) msgColor = '#0f0';
+      else if (this.doorMessage.includes('OPENING')) msgColor = '#5af';
+      ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+      ctx.shadowColor = msgColor;
+      ctx.shadowBlur = 8;
+      ctx.fillText(this.doorMessage, w / 2, 80);
+      ctx.shadowBlur = 0;
+    }
+
     // --- Exit Door proximity check ---
     const exitDoorPos = { x: 14.5, y: 14.5 };
     const exitDx = exitDoorPos.x - this.player.x;
@@ -1439,6 +1545,13 @@ export class Renderer {
     // Sprites zurücksetzen
     this.sprites = [];
     this.initializeSprites();
+
+    // Türzustände zurücksetzen
+    worldState.reset();
+
+    // Door Message zurücksetzen
+    this.doorMessage = '';
+    this.doorMessageTimer = 0;
   }
 
   /**
@@ -1629,6 +1742,14 @@ export class Renderer {
 
         // Item-Pickup prüfen
         this.checkItemPickup();
+
+        // Tür-Animationen updaten
+        worldState.updateWorld(deltaTime);
+
+        // Door Message Timer herunterzählen
+        if (this.doorMessageTimer > 0) {
+          this.doorMessageTimer -= deltaTime;
+        }
 
         // Exit-Door: Wenn Spieler mit Keycard an der Tür [E] drückt → WIN
         if (this.input.isKey('KeyE') && this.hasKeycard) {
