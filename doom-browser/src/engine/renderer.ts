@@ -112,6 +112,14 @@ export class Renderer {
       this.soundManager.init();
     });
 
+    // F1: Kollisions-Debug-Overlay umschalten
+    window.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.code === 'F1') {
+        e.preventDefault();
+        this.minimap.toggleDebug();
+      }
+    });
+
     // Pause-Overlay erstellen (falls Pointer Lock unterstützt)
     if (this.pointerLockAvailable) {
       this.createPauseOverlay();
@@ -1675,12 +1683,13 @@ export class Renderer {
         this.drawHitMarker();
         this.drawWallImpact();
 
-        // Phase 8: Minimap rendern
+        // Phase 8: Minimap rendern (Debug-Modus: vergrößert + Kollisions-Overlay)
         this.minimap.render(this.player, this.sprites);
+        const mmSize = this.minimap.getSize();
         this.ctx.drawImage(
           this.minimap.getCanvas(),
-          this.minimap.getX(),
-          this.minimap.getY()
+          0, 0, mmSize, mmSize,
+          this.minimap.getX(), this.minimap.getY(), mmSize, mmSize
         );
       }
 

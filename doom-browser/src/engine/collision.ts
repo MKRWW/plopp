@@ -58,27 +58,37 @@ export function isWall(mapX: number, mapY: number): boolean {
 }
 
 /**
- * Prüft, ob eine Kreis-Position (mit Radius) eine Wand berührt.
- * Testet alle vier Ecken des Bounding-Quadrats um den Kreis sowie
- * das Mittelpunkt-Tile (für Robustheit bei größeren Radien).
+ * Prüft, ob ein Kreis (Mittelpunkt x/y, gegebener Radius) eine Wand berührt.
+ *
+ * Echtes Circle-vs-AABB-Sweep: für jedes Tile im Bounding-Box-Bereich des
+ * Kreises wird der nächstgelegene Punkt des 1×1-Wand-Quadrats berechnet und
+ * gegen den Radius geprüft. Damit sliden Spieler/Gegner korrekt um
+ * Außenecken herum, statt an den Eckpunkten an einer unsichtbaren Wand
+ * zu hängen (wie es ein reiner AABB-Eckpunkt-Check täte).
  */
 export function positionCollides(
   x: number,
   y: number,
   radius: number = PLAYER_RADIUS
 ): boolean {
-  // Teste die vier Ecken des Bounding-Quadrats
-  const corners = (
-    isWall(Math.floor(x - radius), Math.floor(y - radius)) ||
-    isWall(Math.floor(x + radius), Math.floor(y - radius)) ||
-    isWall(Math.floor(x - radius), Math.floor(y + radius)) ||
-    isWall(Math.floor(x + radius), Math.floor(y + radius))
-  );
+  const x0 = Math.floor(x - radius);
+  const x1 = Math.floor(x + radius);
+  const y0 = Math.floor(y - radius);
+  const y1 = Math.floor(y + radius);
+  const r2 = radius * radius;
 
-  // Zusätzlich Mittelpunkt-Tile prüfen (robuster bei Radius > 0.5)
-  const center = isWall(Math.floor(x), Math.floor(y));
-
-  return corners || center;
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      if (!isWall(tx, ty)) continue;
+      // Nächster Punkt der Tile-AABB [tx, tx+1] × [ty, ty+1] zum Kreismittelpunkt
+      const px = x < tx ? tx : (x > tx + 1 ? tx + 1 : x);
+      const py = y < ty ? ty : (y > ty + 1 ? ty + 1 : y);
+      const dx = x - px;
+      const dy = y - py;
+      if (dx * dx + dy * dy < r2) return true;
+    }
+  }
+  return false;
 }
 
 /**

@@ -60,9 +60,12 @@ export class Player {
 
   /**
    * Wendet eine Bewegung achsenseparat an: erst X, dann Y.
-   * Pro Achse: Wand-Sliding via slideAlongAxis. Wenn die resultierende
-   * Position einen Gegner überlappt, wird diese Achsenbewegung verworfen
-   * (Player kann an Gegnern vorbeisliden, wenn die andere Achse frei ist).
+   * Pro Achse: erst Wand-Sliding via slideAlongAxis. Anschließend wird die
+   * Achse nur dann verworfen, wenn die Bewegung die Überlappung mit
+   * einem Gegner STRENG verschlechtert (also den Abstand verkleinert).
+   * Bewegung, die den Abstand vergrößert oder gleich lässt, ist erlaubt —
+   * der Spieler kann also vor einem nahen Gegner fliehen, auch wenn die
+   * Kreise im Moment noch leicht überlappen.
    */
   private applyMove(
     deltaX: number,
@@ -70,27 +73,41 @@ export class Player {
     enemies?: Array<{ x: number, y: number, radius: number }>
   ): void {
     let newX = slideAlongAxis(this.x, deltaX, this.y, this.radius);
-    if (enemies && this.overlapsAnyEnemy(newX, this.y, enemies)) {
+    if (enemies && this.movementWorsensOverlap(this.x, this.y, newX, this.y, enemies)) {
       newX = this.x;
     }
     let newY = slideAlongAxis(this.y, deltaY, newX, this.radius);
-    if (enemies && this.overlapsAnyEnemy(newX, newY, enemies)) {
+    if (enemies && this.movementWorsensOverlap(newX, this.y, newX, newY, enemies)) {
       newY = this.y;
     }
     this.x = newX;
     this.y = newY;
   }
 
-  private overlapsAnyEnemy(
-    px: number,
-    py: number,
+  /**
+   * Liefert true, wenn die Bewegung von (fromX,fromY) nach (toX,toY) die
+   * Überlappung mit irgendeinem Gegner STRENG verschlechtert (Distanz nimmt
+   * ab UND Endposition liegt innerhalb des Mindestabstands).
+   * Bewegungen, die den Abstand vergrößern oder gleich lassen — auch wenn
+   * Endposition noch leicht überlappt — sind explizit erlaubt (Flucht).
+   */
+  private movementWorsensOverlap(
+    fromX: number,
+    fromY: number,
+    toX: number,
+    toY: number,
     enemies: Array<{ x: number, y: number, radius: number }>
   ): boolean {
     for (const e of enemies) {
-      const dx = px - e.x;
-      const dy = py - e.y;
       const minDist = this.radius + e.radius;
-      if (dx * dx + dy * dy < minDist * minDist) return true;
+      const dxTo = toX - e.x;
+      const dyTo = toY - e.y;
+      const distToSq = dxTo * dxTo + dyTo * dyTo;
+      if (distToSq >= minDist * minDist) continue; // keine Überlappung am Ziel
+      const dxFrom = fromX - e.x;
+      const dyFrom = fromY - e.y;
+      const distFromSq = dxFrom * dxFrom + dyFrom * dyFrom;
+      if (distToSq < distFromSq) return true; // Bewegung INS Innere des Gegners
     }
     return false;
   }
