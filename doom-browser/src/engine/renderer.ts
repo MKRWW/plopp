@@ -506,10 +506,14 @@ export class Renderer {
       if (drawEndX >= SCREEN_WIDTH) drawEndX = SCREEN_WIDTH - 1;
 
       // Distanz-basierte Helligkeit (gleich wie Wände)
-      let brightness = Math.min(1.0, 2.0 / (1.0 + transformY * 0.3));
+      const baseBrightness = Math.min(1.0, 2.0 / (1.0 + transformY * 0.3));
 
       // Sprite-Textur verwenden (oder Fallback-Farbe)
       const texture = sprite.texture;
+
+      // Volumen-Shading-Vorab: Mitte und Halbweite für die per-Spalten-Vignette
+      const spriteCenterX = (drawStartX + drawEndX) / 2;
+      const halfSpriteWidth = Math.max(1, (drawEndX - drawStartX) / 2);
 
       // Von rechts nach links zeichnen (Z-Buffer-Tiefentest)
       const stripeWidth = drawEndX - drawStartX;
@@ -517,6 +521,11 @@ export class Renderer {
         // Nur zeichnen wenn Sprite näher als die Wand in dieser Spalte
         if (transformY < this.zBuffer.get(stripe)) {
           const texX = Math.floor(((stripe - drawStartX) * texture!.width) / stripeWidth);
+
+          // Volumen-Shading: Spalten-Distanz vom Sprite-Zentrum (0 = Mitte, 1 = Rand)
+          const edgeDist = Math.abs(stripe - spriteCenterX) / halfSpriteWidth;
+          const volumeShade = 1.0 - 0.35 * edgeDist * edgeDist;
+          const brightness = baseBrightness * volumeShade;
 
           for (let y = Math.floor(drawStartY); y < drawEndY; y++) {
             const texY = Math.floor(((y - drawStartY) * texture!.height) / (drawEndY - drawStartY));
