@@ -19,7 +19,13 @@
  * laufen über die WorldState-API, um dynamische Türzustate zu berücksichtigen.
  */
 
-/** Basis-Map (statisch, unveränderlich). */
+/** Basis-Map (statisch, unveränderlich).
+ * Tile-Typen: 0=Boden, 1=Stein, 2=Metal, 3=Exit, 4=Blue Key Door, 5=Secret Wall
+ * Layout:
+ *   - Blue Key Door (4) bei (10,14) blockiert den Weg zum Exit (14,14)
+ *   - Secret Wall (5) bei (3,10) mit Bonusbereich dahinter (3,11)+(4,11)
+ *   - Keycard bei (13.5,2.5) ist erreichbar vor der Blue Key Door
+ */
 export const WORLD_MAP = [
   [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
   [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
@@ -31,11 +37,11 @@ export const WORLD_MAP = [
   [1, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 1],
   [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1],
   [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1],
-  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1],
-  [1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-  [1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 5, 0, 0, 1],
   [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 1],
+  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 3, 1],
   [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
 ];
 
@@ -78,37 +84,41 @@ export enum InteractionResult {
 /**
  * Dynamischer World-State: speichert Türzustände als Map von "x,y" → Door.
  * Die statische WORLD_MAP bleibt die Basis, aber alle Gameplay-Abfragen
- * nutzen getTile() / isSolidTile(), um dynamische Zustate zu berücksichtigen.
+ * nutzen getTile() / isSolidTile(), um dynamische Türzustände zu berücksichtigen.
+ * 
+ * Türdefinitionen werden automatisch aus WORLD_MAP gescannt (Tile 4 und 5).
+ * Damit bleiben Map und WorldState immer synchron.
  */
 export class WorldState {
   private doors: Map<string, Door> = new Map();
 
-  /** Tür-Definitionen für die aktuelle Map. */
-  private doorDefs: Array<{ x: number; y: number; type: typeof TILE.BLUE_KEY_DOOR | typeof TILE.SECRET_WALL }> = [];
-
-  /** Initialisiert alle Tür-Definitionen aus der Map. */
+  /** Initialisiert alle Tür-Definitionen durch Scannen von WORLD_MAP. */
   init(): void {
     this.doors.clear();
-    // Blue Key Door bei (10, 14) — blockiert den Weg zum Exit bei (14, 14)
-    this.doorDefs.push({ x: 10, y: 14, type: TILE.BLUE_KEY_DOOR });
-    // Secret Wall bei (3, 10) — dahinter ein kleiner Bonusbereich
-    this.doorDefs.push({ x: 3, y: 10, type: TILE.SECRET_WALL });
 
-    for (const def of this.doorDefs) {
-      this.doors.set(`${def.x},${def.y}`, {
-        type: def.type,
-        state: 'closed',
-        progress: 0,
-        openSpeed: 1.2, // Tiles pro Sekunde für die Animation
-      });
+    // Scanne WORLD_MAP nach Tür-Tiles (4 = Blue Key Door, 5 = Secret Wall)
+    for (let y = 0; y < MAP_HEIGHT; y++) {
+      for (let x = 0; x < MAP_WIDTH; x++) {
+        const base = WORLD_MAP[y]?.[x];
+        if (base === TILE.BLUE_KEY_DOOR || base === TILE.SECRET_WALL) {
+          this.doors.set(`${x},${y}`, {
+            type: base,
+            state: 'closed',
+            progress: 0,
+            openSpeed: 1.2, // progress pro Sekunde
+          });
+        }
+      }
     }
   }
 
   /**
    * Gibt den effektiven Tile-Wert an der Position zurück.
    * Berücksichtigt dynamische Türzustände:
-   *   - geschlossene/öffnende Türen → Tile-Typ (4 oder 5)
-   *   - geöffnete Türen → 0 (Boden)
+   *   - closed:          → Tile-Typ (4 oder 5), vollständig solide
+   *   - opening < 0.7:   → Tile-Typ (4 oder 5), noch solide
+   *   - opening >= 0.7:  → 0 (Boden), passierbar (Animation läuft weiter)
+   *   - open:            → 0 (Boden), vollständig passierbar
    */
   getTile(x: number, y: number): number {
     const base = WORLD_MAP[y]?.[x] ?? 1;
@@ -117,14 +127,15 @@ export class WorldState {
     const door = this.doors.get(`${x},${y}`);
     if (!door) return base; // Fallback: solide
 
-    if (door.state === 'open') return TILE.FLOOR;
-    return base; // closed oder opening → solide
+    // Ab progress >= 0.7 ist die Tür passierbar (auch während "opening")
+    if (door.state === 'open' || door.progress >= 0.7) return TILE.FLOOR;
+    return base; // closed oder opening < 0.7 → solide
   }
 
   /**
    * Prüft ob ein Tile für Gameplay/Raycasting/Kollision solide ist.
    * 0 = Boden (nicht solide), >0 = Wand/Tür (solide).
-   * Geöffnete Türen (4/5 → 0) sind NICHT solide.
+   * Türen sind ab progress >= 0.7 NICHT mehr solide.
    */
   isSolidTile(x: number, y: number): boolean {
     return this.getTile(x, y) > 0;

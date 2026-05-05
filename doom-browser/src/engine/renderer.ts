@@ -770,7 +770,8 @@ export class Renderer {
 
   /**
    * Prüft ob der Spieler eine Tür vor sich aktiviert (E-Taste).
-   * Raycast in Blickrichtung bis zur nächsten Tür.
+   * Raycast in Blickrichtung bis zum ersten soliden Tile.
+   * Nur wenn das erste solide Tile eine Tür ist und nah genug → interagieren.
    */
   private checkDoorInteraction(): void {
     const rayDirX = this.player.dirX;
@@ -799,7 +800,7 @@ export class Renderer {
 
     let hit = 0;
     let steps = 0;
-    const maxSteps = 20; // Max. 20 Tiles weit suchen
+    const maxSteps = 20;
 
     while (hit === 0 && steps < maxSteps) {
       steps++;
@@ -813,17 +814,21 @@ export class Renderer {
 
       if (mapX < 0 || mapX >= MAP_WIDTH || mapY < 0 || mapY >= MAP_HEIGHT) break;
 
-      // Prüfe ob es eine Tür ist (4 oder 5)
-      if (worldState.isDoorTile(mapX, mapY)) {
-        // Distanz zum Spieler prüfen (max. 1.5 Tiles)
+      // Stoppe am ersten soliden Tile
+      if (worldState.isSolidTile(mapX, mapY)) {
+        hit = worldState.getTile(mapX, mapY);
+
+        // Prüfe Distanz zum Spieler (max. 1.5 Tiles)
         const dist = Math.sqrt(
           (mapX + 0.5 - this.player.x) ** 2 + (mapY + 0.5 - this.player.y) ** 2
         );
-        if (dist <= 1.5) {
+        if (dist <= 1.5 && worldState.isDoorTile(mapX, mapY)) {
           const result = worldState.interactAt(mapX, mapY, this.hasKeycard);
           this.showDoorMessage(result);
           return;
         }
+        // Erstes solides Tile ist keine Tür → abbrechen
+        break;
       }
     }
   }
@@ -855,6 +860,7 @@ export class Renderer {
   /**
    * Raycasting-Kernel: Castet eine Ray pro Bildschirmspalte.
    * Verwendet den DDA-Algorithmus für effizientes Grid-Tracing.
+   * Berücksichtigt Türanimationen visuell.
    */
   private castRays(): void {
     this.zBuffer.clear();
@@ -899,6 +905,7 @@ export class Renderer {
 
       // DDA-Suche bis Wand gefunden
       let hit = 0;
+      let doorProgress = 0; // Türfortschritt für Animation
       while (hit === 0) {
         if (sideDistX < sideDistY) {
           sideDistX += deltaDistX;
@@ -915,6 +922,11 @@ export class Renderer {
           hit = 1; // Außerhalb der Karte = Wand
         } else if (worldState.isSolidTile(mapX, mapY)) {
           hit = worldState.getTile(mapX, mapY);
+          // Türfortschritt speichern für visuelle Animation
+          const door = worldState.getDoor(mapX, mapY);
+          if (door && door.state === 'opening') {
+            doorProgress = door.progress;
+          }
         }
       }
 
@@ -957,19 +969,34 @@ export class Renderer {
       // Textur holen
       const texture = this.textureManager.getTexture(hit);
 
-      // Helligkeit berechnen (Distanz-Nebel + Seitenschattierung)
+      // Helligkeit berechnen (Distanz-Nebel + Seitenschattierung + Türanimation)
       const sideShade = side === 1 ? 0.7 : 1.0;
-      const brightness = Math.min(1.0, 2.0 / (1.0 + perpWallDist * 0.3)) * sideShade;
+      let brightness = Math.min(1.0, 2.0 / (1.0 + perpWallDist * 0.3)) * sideShade;
+
+      // Türanimation: während "opening" wird Tür von unten nach oben geöffnet
+      // - Obere Hälfte bleibt sichtbar (Tür "sackt" nach unten)
+      // - Helligkeit nimmt mit progress zu (Tür wird heller/transparenter)
+      if (doorProgress > 0 && doorProgress < 1) {
+        const doorShade = 1.0 - doorProgress * 0.6; // bis zu 60% heller
+        brightness *= doorShade;
+      }
 
       // Textur-Spalte zeichnen
       if (texture) {
-        this.drawTexturedColumn(x, drawStart, drawEnd, lineHeight, texture, u, brightness);
+        this.drawTexturedColumn(x, drawStart, drawEnd, lineHeight, texture, u, brightness, doorProgress);
       } else {
         // Fallback: Einfarbige Wand (sollte nicht passieren)
         const baseColor = hit === 1 ? [180, 50, 50] : (hit === 2 ? [50, 180, 50] : [200, 50, 50]);
-        const r = Math.floor(baseColor[0] * brightness);
-        const g = Math.floor(baseColor[1] * brightness);
-        const b = Math.floor(baseColor[2] * brightness);
+        let r = Math.floor(baseColor[0] * brightness);
+        let g = Math.floor(baseColor[1] * brightness);
+        let b = Math.floor(baseColor[2] * brightness);
+        // Tür-Animation im Fallback
+        if (doorProgress > 0 && doorProgress < 1) {
+          const doorShade = 1.0 - doorProgress * 0.6;
+          r = Math.floor(r * doorShade);
+          g = Math.floor(g * doorShade);
+          b = Math.floor(b * doorShade);
+        }
         this.ctx.fillStyle = `rgb(${r},${g},${b})`;
         this.ctx.fillRect(x, drawStart, 1, drawEnd - drawStart);
       }
@@ -986,6 +1013,7 @@ export class Renderer {
    * @param texture Die Textur
    * @param u Texture-Koordinate (0.0 - 1.0)
    * @param brightness Helligkeitsfaktor
+   * @param doorProgress Türöffnungs-Fortschritt 0..1 (für sichtbare Animation)
    */
   private drawTexturedColumn(
     screenX: number,
@@ -994,7 +1022,8 @@ export class Renderer {
     wallLineHeight: number,
     texture: Texture,
     u: number,
-    brightness: number
+    brightness: number,
+    doorProgress: number = 0
   ): void {
     const texWidth = texture.width;
     const texHeight = texture.height;
@@ -1012,16 +1041,37 @@ export class Renderer {
     const texStep = texHeight / wallLineHeight;
     let texPos = (drawStart - SCREEN_HEIGHT / 2 + wallLineHeight / 2) * texStep;
 
+    // Türanimation: Berechne den sichtbaren Bereich
+    // Bei progress > 0 wird die Tür von unten nach oben "geöffnet"
+    // - Obere Bereiche bleiben sichtbar
+    // - Untere Bereiche werden freigegeben (Boden sichtbar)
+    let doorClipY = 0; // Ab welchem y-Wert (relativ zu drawStart) die Tür noch sichtbar ist
+    if (doorProgress > 0 && doorProgress < 1) {
+      // Tür wird von unten nach oben geöffnet
+      // Bei progress=0.5 ist die untere Hälfte weg, bei progress=1 alles weg
+      doorClipY = Math.floor(visibleHeight * (1.0 - doorProgress));
+    }
+
     for (let y = 0; y < visibleHeight; y++) {
       // Vertikale Textur-Koordinate
       const texY = Math.floor(texPos) & (texHeight - 1);
       texPos += texStep;
 
-      // Source-Pixel aus Textur lesen
-      const srcIdx = (texY * texWidth + texX) * 4;
-
       // Destination-Index in der Spalte
       const dstIdx = y * 4;
+
+      // Tür-Clip: Wenn y > doorClipY, dann ist dieser Bereich bereits "geöffnet"
+      if (doorProgress > 0 && doorProgress < 1 && y >= doorClipY) {
+        // Dieser Bereich ist bereits geöffnet → transparent (Boden sichtbar)
+        colPixels[dstIdx] = 0;
+        colPixels[dstIdx + 1] = 0;
+        colPixels[dstIdx + 2] = 0;
+        colPixels[dstIdx + 3] = 0;
+        continue;
+      }
+
+      // Source-Pixel aus Textur lesen
+      const srcIdx = (texY * texWidth + texX) * 4;
 
       // Farbe mit Helligkeit multiplizieren
       colPixels[dstIdx] = texData[srcIdx] * brightness;
