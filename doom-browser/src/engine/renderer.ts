@@ -10,6 +10,7 @@ import { slideAlongX, slideAlongY, PLAYER_RADIUS, ENEMY_RADIUS, MIN_ENTITY_DIST,
          resolveAllEntityOverlaps, wouldOverlapEntity, resolveEntityCollision } from './collision';
 import { Minimap } from '../game/minimap';
 import { SoundManager, SoundType } from '../audio/sound';
+import { Level, generateLevel } from './level-gen';
 
 /**
  * Konstanten für den Raycaster.
@@ -86,11 +87,33 @@ export class Renderer {
 
   // Edge-Triggering für Interaktion (E-Taste)
   private wasInteractPressedLastFrame: boolean = false;
+  // Separates Edge-Tracking für Exit-Door-E (verhindert Mehrfach-Trigger pro Druck)
+  private wasExitEPressed: boolean = false;
 
-  constructor(player: Player, gameStateManager: GameStateManager, weapon: Weapon) {
+  // Procedural Levels: aktuelles Level + Stage-Counter + Basis-Seed.
+  // Das Level wird beim Stage-Wechsel mit (baseSeed, stage) neu generiert,
+  // damit Spielzüge reproduzierbar sind, falls man den Seed kennt.
+  private currentLevel: Level;
+  private stage: number;
+  private baseSeed: number;
+
+  // Stage-Übergangs-HUD (Banner mit "STAGE N")
+  private stageBannerTimer: number = 0;
+  private readonly stageBannerDuration: number = 2.0;
+
+  constructor(
+    player: Player,
+    gameStateManager: GameStateManager,
+    weapon: Weapon,
+    level: Level,
+    baseSeed: number
+  ) {
     this.player = player;
     this.gameStateManager = gameStateManager;
     this.weapon = weapon;
+    this.currentLevel = level;
+    this.stage = level.stage;
+    this.baseSeed = baseSeed;
     this.zBuffer = new ZBuffer(SCREEN_WIDTH);
     this.textureManager = new TextureManager();
     this.textureManager.initialize();
@@ -389,7 +412,8 @@ export class Renderer {
   }
 
   /**
-   * Initialisiert Test-Sprites in der Welt.
+   * Spawnt alle Sprites des aktuellen Levels: Gegner, Items, Keycard, Decor und
+   * optionales Secret-Item. Liest ausschließlich aus `this.currentLevel`.
    */
   private initializeSprites(): void {
     const spriteSet = generateSpriteTextures();
@@ -398,18 +422,17 @@ export class Renderer {
     const ammoTextures = flat.get(SpriteType.AMMO);
     const healthTextures = flat.get(SpriteType.HEALTH);
     const keycardTextures = flat.get(SpriteType.KEYCARD);
+    const decorTextures: Partial<Record<SpriteType, Texture[] | undefined>> = {
+      [SpriteType.BARREL]: flat.get(SpriteType.BARREL),
+      [SpriteType.TERMINAL]: flat.get(SpriteType.TERMINAL),
+      [SpriteType.LAMP]: flat.get(SpriteType.LAMP),
+      [SpriteType.DEBRIS]: flat.get(SpriteType.DEBRIS),
+    };
 
-    // --- Gegner (6 Stück verteilt über die Karte) ---
-    const enemyPositions = [
-      { x: 5.5, y: 5.5 },
-      { x: 12.5, y: 2.5 },
-      { x: 13.5, y: 9.5 },
-      { x: 3.5, y: 13.5 },
-      { x: 8.5, y: 12.5 },
-      { x: 10.5, y: 3.5 },
-    ];
+    const level = this.currentLevel;
 
-    for (const pos of enemyPositions) {
+    // Gegner
+    for (const pos of level.enemies) {
       const enemy = new Sprite(pos.x, pos.y, SpriteType.ENEMY, enemyTextures?.[0] ?? null);
       if (enemyTextures) enemy.textures = enemyTextures;
       enemy.angleViews = spriteSet.enemyAngleViews;
@@ -418,60 +441,77 @@ export class Renderer {
       this.sprites.push(enemy);
     }
 
-    // --- Items (rotierend, 8 Frames) ---
-    const ammo = new Sprite(7.5, 3.5, SpriteType.AMMO, ammoTextures?.[0] ?? null);
-    if (ammoTextures) ammo.textures = ammoTextures;
-    ammo.animationSpeed = 0.12;
-    this.sprites.push(ammo);
+    // Ammo
+    for (const pos of level.ammo) {
+      const a = new Sprite(pos.x, pos.y, SpriteType.AMMO, ammoTextures?.[0] ?? null);
+      if (ammoTextures) a.textures = ammoTextures;
+      a.animationSpeed = 0.12;
+      this.sprites.push(a);
+    }
 
-    const health = new Sprite(10.5, 10.5, SpriteType.HEALTH, healthTextures?.[0] ?? null);
-    if (healthTextures) health.textures = healthTextures;
-    health.animationSpeed = 0.12;
-    this.sprites.push(health);
+    // Health
+    for (const pos of level.health) {
+      const h = new Sprite(pos.x, pos.y, SpriteType.HEALTH, healthTextures?.[0] ?? null);
+      if (healthTextures) h.textures = healthTextures;
+      h.animationSpeed = 0.12;
+      this.sprites.push(h);
+    }
 
-    const ammo2 = new Sprite(13.5, 13.5, SpriteType.AMMO, ammoTextures?.[0] ?? null);
-    if (ammoTextures) ammo2.textures = ammoTextures;
-    ammo2.animationSpeed = 0.12;
-    this.sprites.push(ammo2);
+    // Keycard
+    {
+      const k = new Sprite(level.keycard.x, level.keycard.y, SpriteType.KEYCARD, keycardTextures?.[0] ?? null);
+      if (keycardTextures) k.textures = keycardTextures;
+      k.animationSpeed = 0.12;
+      this.sprites.push(k);
+    }
 
-    const keycard = new Sprite(13.5, 2.5, SpriteType.KEYCARD, keycardTextures?.[0] ?? null);
-    if (keycardTextures) keycard.textures = keycardTextures;
-    keycard.animationSpeed = 0.12;
-    this.sprites.push(keycard);
+    // Optionales Secret-Health hinter SECRET_WALL
+    if (level.secretHealth) {
+      const s = new Sprite(level.secretHealth.x, level.secretHealth.y, SpriteType.HEALTH, healthTextures?.[0] ?? null);
+      if (healthTextures) s.textures = healthTextures;
+      s.animationSpeed = 0.12;
+      this.sprites.push(s);
+    }
 
-    // --- Secret Room Bonus-Item (Health) ---
-    const secretHealth = new Sprite(4.5, 12.5, SpriteType.HEALTH, healthTextures?.[0] ?? null);
-    if (healthTextures) secretHealth.textures = healthTextures;
-    secretHealth.animationSpeed = 0.12;
-    this.sprites.push(secretHealth);
+    // Decor
+    for (const d of level.decor) {
+      const tex = decorTextures[d.type];
+      const sprite = new Sprite(d.x, d.y, d.type, tex?.[0] ?? null);
+      if (tex) sprite.textures = tex;
+      this.sprites.push(sprite);
+    }
+  }
 
-    // --- Dekor-Sprites ---
-    const barrelTextures = flat.get(SpriteType.BARREL);
-    const terminalTextures = flat.get(SpriteType.TERMINAL);
-    const lampTextures = flat.get(SpriteType.LAMP);
-    const debrisTextures = flat.get(SpriteType.DEBRIS);
+  /**
+   * Generiert das nächste Level und installiert es: Welt-State, Spielerposition,
+   * Sprites und transienter HUD-Banner. Health/Score/Ammo bleiben erhalten —
+   * Stages sind kumulativ wie im Original-Doom.
+   */
+  private advanceStage(): void {
+    const nextStage = this.stage + 1;
+    const nextLevel = generateLevel(this.baseSeed, nextStage);
+    worldState.loadLevel(nextLevel);
+    this.currentLevel = nextLevel;
+    this.stage = nextStage;
 
-    const addDecor = (x: number, y: number, type: SpriteType, textures: Texture[] | undefined) => {
-      const decor = new Sprite(x, y, type, textures?.[0] ?? null);
-      if (textures) decor.textures = textures;
-      this.sprites.push(decor);
-    };
+    // Spieler positionieren + Blickrichtung
+    this.player.setPosition(nextLevel.spawn.x, nextLevel.spawn.y);
+    this.player.dirX = nextLevel.spawn.dirX;
+    this.player.dirY = nextLevel.spawn.dirY;
+    // Camera-Plane senkrecht zur Blickrichtung, |plane| = 0.66 (FOV ≈ 66°)
+    this.player.planeX = -nextLevel.spawn.dirY * 0.66;
+    this.player.planeY = nextLevel.spawn.dirX * 0.66;
 
-    // Fässer
-    addDecor(4.5, 7.5, SpriteType.BARREL, barrelTextures);
-    addDecor(11.5, 7.5, SpriteType.BARREL, barrelTextures);
-    addDecor(1.5, 11.5, SpriteType.BARREL, barrelTextures);
+    // Pro-Stage-Reset
+    this.hasKeycard = false;
+    this.keycardPickupMessage = 0;
+    this.doorMessage = '';
+    this.doorMessageTimer = 0;
+    this.sprites = [];
+    this.initializeSprites();
 
-    // Terminal
-    addDecor(2.5, 8.5, SpriteType.TERMINAL, terminalTextures);
-
-    // Lampen
-    addDecor(7.5, 1.5, SpriteType.LAMP, lampTextures);
-    addDecor(14.5, 5.5, SpriteType.LAMP, lampTextures);
-
-    // Schrott
-    addDecor(6.5, 11.5, SpriteType.DEBRIS, debrisTextures);
-    addDecor(9.5, 13.5, SpriteType.DEBRIS, debrisTextures);
+    this.stageBannerTimer = this.stageBannerDuration;
+    this.soundManager.play(SoundType.DOOR);
   }
 
   /**
@@ -1497,8 +1537,8 @@ export class Renderer {
       ctx.shadowBlur = 0;
     }
 
-    // --- Exit Door proximity check ---
-    const exitDoorPos = { x: 14.5, y: 14.5 };
+    // --- Exit Door proximity check (Position aus Level) ---
+    const exitDoorPos = this.currentLevel.exit;
     const exitDx = exitDoorPos.x - this.player.x;
     const exitDy = exitDoorPos.y - this.player.y;
     const exitDist = Math.sqrt(exitDx * exitDx + exitDy * exitDy);
@@ -1509,12 +1549,30 @@ export class Renderer {
         ctx.fillStyle = '#0f0';
         ctx.shadowColor = '#0f0';
         ctx.shadowBlur = 8;
-        ctx.fillText('EXIT — [E] um zu fliehen', w / 2, h - 90);
+        ctx.fillText(`EXIT — [E] zu Stage ${this.stage + 1}`, w / 2, h - 90);
         ctx.shadowBlur = 0;
       } else {
         ctx.fillStyle = '#f44';
         ctx.fillText('KEYCARD REQUIRED', w / 2, h - 90);
       }
+    }
+
+    // --- Stage-Anzeige (oben Mitte, klein) ---
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 14px monospace';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText(`STAGE ${this.stage}`, w / 2, 22);
+
+    // --- Stage-Übergangs-Banner ---
+    if (this.stageBannerTimer > 0) {
+      const alpha = Math.min(1, this.stageBannerTimer / 0.7);
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 36px monospace';
+      ctx.fillStyle = `rgba(255, 220, 80, ${alpha})`;
+      ctx.shadowColor = '#fc0';
+      ctx.shadowBlur = 14;
+      ctx.fillText(`STAGE ${this.stage}`, w / 2, h / 2 - 60);
+      ctx.shadowBlur = 0;
     }
 
     ctx.textAlign = 'left';
@@ -1590,37 +1648,35 @@ export class Renderer {
   }
 
   /**
-   * Reset des Spiels: Spieler-Position, Health, Ammo, Gegner, Items.
+   * Reset des Spiels nach Tod: neuer Basis-Seed + frisches Stage 1.
+   * Jeder Run hat dadurch eine andere Level-Sequenz.
    */
   private resetGame(): void {
-    // Spieler zurücksetzen (an freie Position)
-    this.player.setPosition(2.5, 2.5);
-    this.player.dirX = 1.0;
-    this.player.dirY = 0.0;
-    this.player.planeX = 0.0;
-    this.player.planeY = 0.66;
+    this.baseSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
+    this.stage = 1;
+    const level = generateLevel(this.baseSeed, this.stage);
+    worldState.loadLevel(level);
+    this.currentLevel = level;
+
+    // Spieler an Spawn des neuen Stage 1
+    this.player.setPosition(level.spawn.x, level.spawn.y);
+    this.player.dirX = level.spawn.dirX;
+    this.player.dirY = level.spawn.dirY;
+    this.player.planeX = -level.spawn.dirY * 0.66;
+    this.player.planeY = level.spawn.dirX * 0.66;
     this.player.score = 0;
 
-    // Waffe zurücksetzen
     this.weapon.reset();
-
-    // Damage-Flash zurücksetzen
     this.damageFlashTimer = 0;
-
-    // Keycard zurücksetzen
     this.hasKeycard = false;
     this.keycardPickupMessage = 0;
 
-    // Sprites zurücksetzen
     this.sprites = [];
     this.initializeSprites();
 
-    // Türzustände zurücksetzen
-    worldState.reset();
-
-    // Door Message zurücksetzen
     this.doorMessage = '';
     this.doorMessageTimer = 0;
+    this.stageBannerTimer = 0;
   }
 
   /**
@@ -1765,18 +1821,14 @@ export class Renderer {
             sprite.hitFlashTimer -= deltaTime;
           }
 
-          // Death-Animation: Timer herunterzählen und Sprite entfernen wenn fertig
+          // Death-Animation: Timer herunterzählen und Sprite entfernen wenn fertig.
+          // Mit prozeduralen Stages gibt es kein Auto-WIN bei "alle Gegner tot" mehr —
+          // Fortschritt läuft ausschließlich über die Exit-Tür.
           if (sprite.isDying) {
             sprite.deathTimer -= deltaTime;
             if (sprite.deathTimer <= 0) {
               const idx = this.sprites.indexOf(sprite);
               if (idx >= 0) this.sprites.splice(idx, 1);
-
-              // Prüfen ob alle Gegner tot → WIN
-              const enemiesLeft = this.sprites.filter(s => s.type === SpriteType.ENEMY && !s.isDying).length;
-              if (enemiesLeft === 0) {
-                this.gameStateManager.transitionTo(GameState.WIN);
-              }
             }
           }
         }
@@ -1820,17 +1872,24 @@ export class Renderer {
           this.doorMessageTimer -= deltaTime;
         }
 
-        // Exit-Door: Wenn Spieler mit Keycard an der Tür [E] drückt → WIN
-        if (this.input.isKey('KeyE') && this.hasKeycard) {
-          const exitDoorPos = { x: 14.5, y: 14.5 };
-          const exitDx = exitDoorPos.x - this.player.x;
-          const exitDy = exitDoorPos.y - this.player.y;
-          const exitDist = Math.sqrt(exitDx * exitDx + exitDy * exitDy);
-          if (exitDist < 1.5) {
+        // Stage-Banner-Timer
+        if (this.stageBannerTimer > 0) {
+          this.stageBannerTimer -= deltaTime;
+        }
+
+        // Exit-Door: Spieler mit Keycard an der Exit-Tür → nächste Stage.
+        // Edge-getriggert über `wasInteractPressedLastFrame` (oben in updatePlayer
+        // aktualisiert), damit die Stage nicht mehrfach pro Tastendruck wechselt.
+        if (this.hasKeycard && this.input.isKey('KeyE') && !this.wasExitEPressed) {
+          const exitDx = this.currentLevel.exit.x - this.player.x;
+          const exitDy = this.currentLevel.exit.y - this.player.y;
+          const exitDistSq = exitDx * exitDx + exitDy * exitDy;
+          if (exitDistSq < 1.5 * 1.5) {
             this.player.score += 500;
-            this.gameStateManager.transitionTo(GameState.WIN);
+            this.advanceStage();
           }
         }
+        this.wasExitEPressed = this.input.isKey('KeyE');
 
         // Pointer-Lock-Verlust → Pause-Overlay zeigen
         if (this.pointerLockAvailable && !this.input.getPointerLocked()) {
