@@ -16,6 +16,8 @@ export interface SpriteTextureSet {
   enemyAngleViews: Texture[][];
 }
 
+export const corpseTexture = generateCorpseTexture(SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+
 export function generateSpriteTextures(): SpriteTextureSet {
   const flat = new Map<SpriteType, Texture[]>();
 
@@ -1298,6 +1300,91 @@ function generateDebrisTexture(): Texture {
   ctx.fillStyle = '#888';
   ctx.fillRect(cx - 4, 36, 2, 2);
   ctx.fillRect(cx + 14, 38, 1, 2);
+
+  return texFromCanvas(canvas, ctx);
+}
+
+/* ------------------------------------------------------------------ */
+/* Corpse texture — flat top-down bloodied body                        */
+/* ------------------------------------------------------------------ */
+
+export function generateCorpseTexture(w: number, h: number): Texture {
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, w, h);
+
+  const cx = w / 2;
+  const cy = h / 2;
+
+  // Blood pool — dark reddish-brown ellipse
+  ctx.fillStyle = 'rgba(60, 15, 10, 0.85)';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + 2, 24, 28, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Outer blood ring (darker, slightly larger)
+  ctx.strokeStyle = 'rgba(40, 10, 8, 0.4)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + 3, 26, 30, 0, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Body silhouette — elongated blob, head at top, legs at bottom
+  ctx.fillStyle = '#50140f';
+  ctx.beginPath();
+  // Head (rounded top)
+  ctx.arc(cx, cy - 10, 9, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Torso (widens from head)
+  ctx.beginPath();
+  ctx.moveTo(cx - 7, cy - 2);
+  ctx.quadraticCurveTo(cx - 14, cy + 4, cx - 13, cy + 10);
+  ctx.lineTo(cx + 13, cy + 10);
+  ctx.quadraticCurveTo(cx + 14, cy + 4, cx + 7, cy - 2);
+  ctx.fill();
+
+  // Arms — splayed out to sides
+  ctx.fillStyle = '#50140f';
+  ctx.beginPath();
+  ctx.moveTo(cx - 7, cy);
+  ctx.quadraticCurveTo(cx - 18, cy - 4, cx - 22, cy + 2);
+  ctx.quadraticCurveTo(cx - 24, cy + 6, cx - 18, cy + 8);
+  ctx.quadraticCurveTo(cx - 14, cy + 4, cx - 7, cy + 6);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(cx + 7, cy);
+  ctx.quadraticCurveTo(cx + 18, cy - 4, cx + 22, cy + 2);
+  ctx.quadraticCurveTo(cx + 24, cy + 6, cx + 18, cy + 8);
+  ctx.quadraticCurveTo(cx + 14, cy + 4, cx + 7, cy + 6);
+  ctx.fill();
+
+  // Legs — slightly separated, ending in feet
+  ctx.fillStyle = '#401008';
+  ctx.beginPath();
+  ctx.moveTo(cx - 6, cy + 10);
+  ctx.quadraticCurveTo(cx - 9, cy + 20, cx - 10, cy + 26);
+  ctx.quadraticCurveTo(cx - 12, cy + 30, cx - 6, cy + 32);
+  ctx.quadraticCurveTo(cx - 2, cy + 32, cx - 2, cy + 28);
+  ctx.quadraticCurveTo(cx - 3, cy + 22, cx - 3, cy + 10);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(cx + 3, cy + 10);
+  ctx.quadraticCurveTo(cx + 4, cy + 20, cx + 7, cy + 26);
+  ctx.quadraticCurveTo(cx + 9, cy + 30, cx + 13, cy + 28);
+  ctx.quadraticCurveTo(cx + 14, cy + 24, cx + 11, cy + 20);
+  ctx.quadraticCurveTo(cx + 9, cy + 14, cx + 7, cy + 10);
+  ctx.fill();
+
+  // Darker shading in center
+  ctx.fillStyle = 'rgba(40, 8, 5, 0.3)';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + 5, 10, 12, 0, 0, Math.PI * 2);
+  ctx.fill();
 
   return texFromCanvas(canvas, ctx);
 }

@@ -60,6 +60,10 @@ export class Sprite {
   public deathTimer: number = 0;
   public deathDuration: number = 0.45;
 
+  // Corpse persistence (dead state after death animation)
+  public isDead: boolean = false;
+  public corpseTexture: Texture | null = null;
+
   constructor(x: number, y: number, type: SpriteType, texture: Texture | null = null) {
     this.x = x;
     this.y = y;

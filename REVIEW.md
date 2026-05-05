@@ -1,0 +1,1 @@
+APPROVE — all spec requirements met: lifecycle transition (alive→dying→dead), corpse rendering at correct floor anchor with CORPSE_SCALE=0.18, z-buffer depth test, AI/collision exclusion at all three call sites, shared texture generated once at module load (better than per-spawn, still satisfies "not per frame"), and palette matches spec (r≈80,g≈20,b≈15).

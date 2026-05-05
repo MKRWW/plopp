@@ -4,6 +4,7 @@ import { ZBuffer } from './zbuffer';
 import { InputHandler, pointerLockSupported } from '../player/input';
 import { TextureManager, Texture } from './textures';
 import { Sprite, SpriteType, generateSpriteTextures } from './sprite';
+import { corpseTexture } from './sprite-textures';
 import { GameState, GameStateManager } from '../game/state';
 import { Weapon, WeaponState } from '../game/weapon';
 import { slideAlongX, slideAlongY, PLAYER_RADIUS, ENEMY_RADIUS, MIN_ENTITY_DIST,
@@ -19,6 +20,7 @@ const SCREEN_WIDTH = 640;
 const SCREEN_HEIGHT = 480;
 const MOVE_SPEED = 3.0;          // Tiles pro Sekunde (Normal)
 const SPRINT_MULTIPLIER = 1.8;  // Sprint-Faktor
+const CORPSE_SCALE = 0.18;      // Corpse height as fraction of full sprite height
 
 /**
  * Raycasting-Renderer.
@@ -341,7 +343,7 @@ export class Renderer {
 
     for (const sprite of this.sprites) {
       if (sprite.type !== SpriteType.ENEMY) continue;
-      if (sprite.isDying) continue;
+      if (sprite.isDying || sprite.isDead) continue;
 
       // Vektor vom Spieler zum Sprite
       const toSpriteX = sprite.x - px;
@@ -438,6 +440,7 @@ export class Renderer {
       enemy.angleViews = spriteSet.enemyAngleViews;
       enemy.facingAngle = Math.atan2(this.player.y - pos.y, this.player.x - pos.x);
       enemy.animationSpeed = 0.4;
+      enemy.corpseTexture = corpseTexture;
       this.sprites.push(enemy);
     }
 
@@ -596,7 +599,8 @@ export class Renderer {
       if (
         sprite.type === SpriteType.ENEMY &&
         sprite.angleViews.length > 0 &&
-        !sprite.isDying
+        !sprite.isDying &&
+        !sprite.isDead
       ) {
         const angleToCamera = Math.atan2(py - sprite.y, px - sprite.x);
         const rel = angleToCamera - sprite.facingAngle;
@@ -607,6 +611,50 @@ export class Renderer {
         if (views && views[angleIdx]) {
           texture = views[angleIdx];
         }
+      }
+
+      // Corpse rendering: flat, small, anchored to floor — no shadow, no flash, no death-tint
+      if (sprite.type === SpriteType.ENEMY && sprite.isDead && sprite.corpseTexture) {
+        texture = sprite.corpseTexture;
+        const fullSpriteHeight = Math.abs(Math.floor(SCREEN_HEIGHT / transformY));
+        spriteHeight = fullSpriteHeight * CORPSE_SCALE;
+        const spriteWidthCorpse = spriteHeight;
+        // Anchor corpse bottom to floor line (horizon + half full height)
+        const corpseDrawEndY = SCREEN_HEIGHT / 2 + Math.floor(fullSpriteHeight / 2);
+        const corpseDrawStartY = Math.max(0, Math.floor(corpseDrawEndY - spriteHeight));
+        const corpseDrawStartX = Math.floor(spriteScreenX - spriteWidthCorpse / 2);
+        const corpseDrawEndX = Math.floor(spriteScreenX + spriteWidthCorpse / 2);
+
+        // Skip shadow for corpses (body IS the shadow)
+        const baseCorpseBrightness = Math.min(1.0, 2.0 / (1.0 + transformY * 0.3));
+
+        const stripeWidth = corpseDrawEndX - corpseDrawStartX;
+        const corpseCenterX = (corpseDrawStartX + corpseDrawEndX) / 2;
+        const corpseHalfWidth = Math.max(1, (corpseDrawEndX - corpseDrawStartX) / 2);
+
+        for (let stripe = Math.max(0, corpseDrawStartX); stripe < Math.min(SCREEN_WIDTH, corpseDrawEndX); stripe++) {
+          if (transformY < this.zBuffer.get(stripe)) {
+            const texX = Math.floor(((stripe - corpseDrawStartX) * texture.width) / Math.max(1, stripeWidth));
+            const edgeDist = Math.abs(stripe - corpseCenterX) / corpseHalfWidth;
+            const volumeShade = 1.0 - 0.35 * edgeDist * edgeDist;
+            const brightness = baseCorpseBrightness * volumeShade;
+
+            for (let y = corpseDrawStartY; y < Math.min(SCREEN_HEIGHT - 1, corpseDrawEndY); y++) {
+              const texY = Math.floor(((y - corpseDrawStartY) * texture.height) / Math.max(1, corpseDrawEndY - corpseDrawStartY));
+              const srcIdx = (texY * texture.width + texX) * 4;
+              const srcData = texture.data.data;
+              const alpha = srcData[srcIdx + 3];
+              if (alpha > 0) {
+                const r = Math.min(255, Math.floor(srcData[srcIdx] * brightness));
+                const g = Math.min(255, Math.floor(srcData[srcIdx + 1] * brightness));
+                const b = Math.min(255, Math.floor(srcData[srcIdx + 2] * brightness));
+                this.ctx.fillStyle = `rgba(${r},${g},${b},${alpha / 255})`;
+                this.ctx.fillRect(stripe, y, 1, 1);
+              }
+            }
+          }
+        }
+        continue; // skip rest of per-sprite rendering for corpses
       }
 
       // Boden-Schatten: flache Ellipse am Sprite-Fuß (z-buffer-aware)
@@ -771,7 +819,7 @@ export class Renderer {
     // Build list of alive enemy obstacles for entity collision
     const enemyObstacles: Array<{ x: number, y: number, radius: number }> = [];
     for (const sprite of this.sprites) {
-      if (sprite.type === SpriteType.ENEMY && sprite.isAlive && !sprite.isDying) {
+      if (sprite.type === SpriteType.ENEMY && sprite.isAlive && !sprite.isDying && !sprite.isDead) {
         enemyObstacles.push({ x: sprite.x, y: sprite.y, radius: ENEMY_RADIUS });
       }
     }
@@ -1698,7 +1746,7 @@ export class Renderer {
 
     // Collect all alive enemies for pairwise collision
     const aliveEnemies = this.sprites.filter(
-      s => s.type === SpriteType.ENEMY && s.isAlive && !s.isDying
+      s => s.type === SpriteType.ENEMY && s.isAlive && !s.isDying && !s.isDead
     );
 
     for (const sprite of aliveEnemies) {
@@ -1823,14 +1871,14 @@ export class Renderer {
             sprite.hitFlashTimer -= deltaTime;
           }
 
-          // Death-Animation: Timer herunterzählen und Sprite entfernen wenn fertig.
+          // Death-Animation: Timer herunterzählen und in Corpse-Status übergehen.
           // Mit prozeduralen Stages gibt es kein Auto-WIN bei "alle Gegner tot" mehr —
-          // Fortschritt läuft ausschließlich über die Exit-Tür.
+          // Fortschritt läuft ausschliesslich über die Exit-Tür.
           if (sprite.isDying) {
             sprite.deathTimer -= deltaTime;
             if (sprite.deathTimer <= 0) {
-              const idx = this.sprites.indexOf(sprite);
-              if (idx >= 0) this.sprites.splice(idx, 1);
+              sprite.isDying = false;
+              sprite.isDead = true;
             }
           }
         }
