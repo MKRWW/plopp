@@ -106,11 +106,6 @@ export class GameStateManager {
     ctx.fillText('PLOPP', w / 2, h / 2 - 80);
     ctx.shadowBlur = 0;
 
-    // Untertitel
-    ctx.fillStyle = '#999';
-    ctx.font = '24px monospace';
-    ctx.fillText('Browser Clone', w / 2, h / 2 - 40);
-
     // Blinkender Start-Text
     const blink = Math.floor(Date.now() / 500) % 2;
     if (blink) {
