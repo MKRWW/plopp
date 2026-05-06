@@ -50,7 +50,21 @@ export class SoundManager {
   private musicAudio: HTMLAudioElement | null = null;
   private musicPlaying: boolean = false;
   private currentTrackIndex: number = 0;
+  private trackQueue: number[] = [];
   private musicVolume: number = 0.3;
+
+  /**
+   * Shuffles track indices using Fisher-Yates and fills the queue.
+   */
+  private shuffleQueue(): void {
+    const arr: number[] = [];
+    for (let i = 0; i < MUSIC_FILES.length; i++) arr.push(i);
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    this.trackQueue = arr;
+  }
 
   /**
    * Initialisiert den Audio-Context (muss nach User-Interaktion aufgerufen werden).
@@ -71,14 +85,14 @@ export class SoundManager {
    * Initialisiert die Hintergrundmusik.
    */
   private initMusic(): void {
-    // Zufälligen Track auswählen
-    this.currentTrackIndex = Math.floor(Math.random() * MUSIC_FILES.length);
-
     this.musicAudio = new Audio();
     this.musicAudio.volume = this.musicVolume;
     this.musicAudio.preload = 'auto';
 
-    // When track ends, queue the next random track
+    this.shuffleQueue();
+    this.currentTrackIndex = this.trackQueue.pop()!;
+
+    // When track ends, queue the next random track (shuffle-based)
     this.musicAudio.addEventListener('ended', () => {
       this.playNextTrack();
     });
@@ -101,13 +115,11 @@ export class SoundManager {
    * Spielt den nächsten Track (zufällig, aber nicht denselben).
    */
   private playNextTrack(): void {
-    let newIndex: number;
-    do {
-      newIndex = Math.floor(Math.random() * MUSIC_FILES.length);
-    } while (newIndex === this.currentTrackIndex && MUSIC_FILES.length > 1);
-
-    this.currentTrackIndex = newIndex;
-    this.loadTrack(newIndex);
+    if (this.trackQueue.length === 0) {
+      this.shuffleQueue();
+    }
+    this.currentTrackIndex = this.trackQueue.pop()!;
+    this.loadTrack(this.currentTrackIndex);
 
     if (this.musicPlaying) {
       this.musicAudio!.play().catch(() => {});
