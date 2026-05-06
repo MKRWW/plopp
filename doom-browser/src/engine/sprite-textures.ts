@@ -36,6 +36,7 @@ export function generateSpriteTextures(): SpriteTextureSet {
   flat.set(SpriteType.AMMO, buildRotatingItemFrames(generateAmmoFront, generateAmmoBack));
   flat.set(SpriteType.HEALTH, buildRotatingItemFrames(generateHealthFront, generateHealthBack));
   flat.set(SpriteType.KEYCARD, buildRotatingItemFrames(generateKeycardFront, generateKeycardBack));
+  flat.set(SpriteType.YELLOW_KEYCARD, buildRotatingItemFrames(generateYellowKeycardFront, generateYellowKeycardBack));
 
    // Weapon pickups: 8-frame rotating sprites
    flat.set(SpriteType.WEAPON_SHOTGUN, buildRotatingItemFrames(generateShotgunFront, generateShotgunBack));
@@ -1095,6 +1096,116 @@ function generateKeycardBack(): Texture {
   ctx.save();
   ctx.globalCompositeOperation = 'source-atop';
   ctx.fillStyle = 'rgba(90, 184, 255, 0.10)';
+  ctx.beginPath();
+  ctx.roundRect(cardX, cardY, cardW, cardH, 2);
+  ctx.fill();
+  ctx.restore();
+
+  return texFromCanvas(canvas, ctx);
+}
+
+function generateYellowKeycardFront(): Texture {
+  const canvas = document.createElement('canvas');
+  canvas.width = SPRITE_TEXTURE_SIZE;
+  canvas.height = SPRITE_TEXTURE_SIZE;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+  const cx = 32;
+  const cy = 32;
+  const cardW = 24;
+  const cardH = 18;
+  const cardX = cx - cardW / 2;
+  const cardY = cy - cardH / 2;
+
+  const cardGrad = ctx.createLinearGradient(cardX, cardY, cardX + cardW, cardY + cardH);
+  cardGrad.addColorStop(0, '#9c7a1a');
+  cardGrad.addColorStop(0.5, '#cc9a20');
+  cardGrad.addColorStop(1, '#9c7a1a');
+  ctx.fillStyle = cardGrad;
+  ctx.beginPath();
+  ctx.roundRect(cardX, cardY, cardW, cardH, 2);
+  ctx.fill();
+
+  ctx.strokeStyle = '#ffd700';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(cardX, cardY, cardW, cardH, 2);
+  ctx.stroke();
+
+  ctx.fillStyle = '#d4a017';
+  ctx.fillRect(cardX + 2, cardY + 3, 5, 4);
+  ctx.fillStyle = '#f0c040';
+  ctx.fillRect(cardX + 3, cardY + 3, 3, 2);
+
+  ctx.strokeStyle = '#ffd700';
+  ctx.beginPath();
+  ctx.moveTo(cardX + 11, cardY + 3);
+  ctx.lineTo(cardX + 19, cardY + 3);
+  ctx.lineTo(cardX + 20, cardY + 5);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cardX + 11, cardY + 7);
+  ctx.lineTo(cardX + 17, cardY + 7);
+  ctx.stroke();
+
+  ctx.fillStyle = '#ffd700';
+  ctx.fillRect(cardX + 2, cardY + 11, 1, 5);
+  ctx.fillRect(cardX + 5, cardY + 11, 1, 5);
+  ctx.fillRect(cardX + 7, cardY + 11, 2, 5);
+  ctx.fillRect(cardX + 11, cardY + 11, 1, 5);
+  ctx.fillRect(cardX + 13, cardY + 11, 1, 5);
+  ctx.fillRect(cardX + 15, cardY + 11, 1, 5);
+  ctx.fillRect(cardX + 17, cardY + 11, 2, 5);
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+  ctx.shadowColor = '#ffd700';
+  ctx.shadowBlur = 8;
+  ctx.fillStyle = 'rgba(255, 215, 0, 0.35)';
+  ctx.beginPath();
+  ctx.roundRect(cardX, cardY, cardW, cardH, 2);
+  ctx.fill();
+  ctx.restore();
+
+  return texFromCanvas(canvas, ctx);
+}
+
+function generateYellowKeycardBack(): Texture {
+  const canvas = document.createElement('canvas');
+  canvas.width = SPRITE_TEXTURE_SIZE;
+  canvas.height = SPRITE_TEXTURE_SIZE;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+  const cx = 32;
+  const cy = 32;
+  const cardW = 24;
+  const cardH = 18;
+  const cardX = cx - cardW / 2;
+  const cardY = cy - cardH / 2;
+
+  const cardGrad = ctx.createLinearGradient(cardX, cardY, cardX + cardW, cardY + cardH);
+  cardGrad.addColorStop(0, '#665510');
+  cardGrad.addColorStop(0.5, '#806a15');
+  cardGrad.addColorStop(1, '#665510');
+  ctx.fillStyle = cardGrad;
+  ctx.beginPath();
+  ctx.roundRect(cardX, cardY, cardW, cardH, 2);
+  ctx.fill();
+
+  ctx.strokeStyle = '#d8b83a';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(cardX, cardY, cardW, cardH, 2);
+  ctx.stroke();
+
+  // Magnetic stripe across the back
+  ctx.fillStyle = '#2a1a0a';
+  ctx.fillRect(cardX + 1, cardY + 5, cardW - 2, 3);
+
+  // Subtle edge highlight only
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+  ctx.fillStyle = 'rgba(255, 215, 0, 0.10)';
   ctx.beginPath();
   ctx.roundRect(cardX, cardY, cardW, cardH, 2);
   ctx.fill();

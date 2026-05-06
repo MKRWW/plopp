@@ -19,6 +19,8 @@ describe('Level Generation - Determinism', () => {
       expect(levels[i].entrance).toEqual(levels[0].entrance);
       expect(levels[i].exit).toEqual(levels[0].exit);
       expect(levels[i].keycard).toEqual(levels[0].keycard);
+      expect(levels[i].yellowKeycard).toEqual(levels[0].yellowKeycard);
+      expect(levels[i].blueKeycard).toEqual(levels[0].blueKeycard);
       expect(levels[i].enemies).toEqual(levels[0].enemies);
       expect(levels[i].ammo).toEqual(levels[0].ammo);
       expect(levels[i].health).toEqual(levels[0].health);
@@ -26,6 +28,10 @@ describe('Level Generation - Determinism', () => {
       expect(levels[i].decor).toEqual(levels[0].decor);
       expect(levels[i].shotguns).toEqual(levels[0].shotguns);
       expect(levels[i].rocketLaunchers).toEqual(levels[0].rocketLaunchers);
+      expect(levels[i].spawnRooms).toEqual(levels[0].spawnRooms);
+      expect(levels[i].exitRooms).toEqual(levels[0].exitRooms);
+      expect(levels[i].exits).toEqual(levels[0].exits);
+      expect(levels[i].rooms).toEqual(levels[0].rooms);
     }
   });
 
@@ -55,14 +61,14 @@ describe('Level Generation - Determinism', () => {
 });
 
 describe('Level Generation - Validation', () => {
-  it('all tiles are valid TILE constants (0-5)', () => {
+  it('all tiles are valid TILE constants (0-6)', () => {
     for (let stage = 1; stage <= 3; stage++) {
       const level = generateLevel(stage * 100, stage);
       for (let y = 0; y < level.height; y++) {
         for (let x = 0; x < level.width; x++) {
           const tile = level.map[y][x];
           expect(tile).toBeGreaterThanOrEqual(0);
-          expect(tile).toBeLessThanOrEqual(5);
+          expect(tile).toBeLessThanOrEqual(6);
         }
       }
     }
@@ -77,20 +83,32 @@ describe('Level Generation - Validation', () => {
     }
   });
 
-  it('exit door is on perimeter of exit room (EXIT_DOOR tile)', () => {
+  it('exit doors are on EXIT_DOOR tiles (exits.length >= 2)', () => {
     for (let stage = 1; stage <= 3; stage++) {
       const level = generateLevel(stage * 300, stage);
-      const exitX = Math.floor(level.exit.x);
-      const exitY = Math.floor(level.exit.y);
-      expect(level.map[exitY][exitX]).toBe(TILE.EXIT_DOOR);
+      expect(level.exits.length).toBeGreaterThanOrEqual(2);
+      for (const exit of level.exits) {
+        const exitX = Math.floor(exit.x);
+        const exitY = Math.floor(exit.y);
+        expect(level.map[exitY][exitX]).toBe(TILE.EXIT_DOOR);
+      }
     }
   });
 
-  it('keycard is on a FLOOR tile', () => {
+  it('blueKeycard is on a FLOOR tile', () => {
     for (let stage = 1; stage <= 3; stage++) {
       const level = generateLevel(stage * 400, stage);
-      const kx = Math.floor(level.keycard.x);
-      const ky = Math.floor(level.keycard.y);
+      const kx = Math.floor(level.blueKeycard.x);
+      const ky = Math.floor(level.blueKeycard.y);
+      expect(level.map[ky][kx]).toBe(TILE.FLOOR);
+    }
+  });
+
+  it('yellowKeycard is on a FLOOR tile', () => {
+    for (let stage = 1; stage <= 3; stage++) {
+      const level = generateLevel(stage * 410, stage);
+      const kx = Math.floor(level.yellowKeycard.x);
+      const ky = Math.floor(level.yellowKeycard.y);
       expect(level.map[ky][kx]).toBe(TILE.FLOOR);
     }
   });
@@ -128,26 +146,26 @@ describe('Level Generation - Validation', () => {
     }
   });
 
-  it('width/height scale with stage: stage1≥22, stage3+≥26', () => {
-    for (let stage = 1; stage <= 3; stage++) {
+  it('width/height scale with stage: 32-50 range', () => {
+    for (let stage = 1; stage <= 5; stage++) {
       const level = generateLevel(stage * 800, stage);
-      expect(level.width).toBeGreaterThanOrEqual(20 + stage * 2);
-      expect(level.width).toBeLessThanOrEqual(28);
-      expect(level.height).toBeGreaterThanOrEqual(20 + stage * 2);
-      expect(level.height).toBeLessThanOrEqual(28);
+      expect(level.width).toBeGreaterThanOrEqual(32);
+      expect(level.width).toBeLessThanOrEqual(50);
+      expect(level.height).toBeGreaterThanOrEqual(32);
+      expect(level.height).toBeLessThanOrEqual(50);
     }
   });
 
-  it('generated levels contain at least 5 rooms (target 6-7)', () => {
+  it('generated levels contain at least 12 rooms', () => {
     for (let stage = 1; stage <= 3; stage++) {
       for (let s = 0; s < 10; s++) {
         const level = generateLevel(s * 100 + stage * 1000, stage);
-        expect(level.rooms?.length ?? 0).toBeGreaterThanOrEqual(5);
+        expect(level.rooms.length).toBeGreaterThanOrEqual(12);
       }
     }
   });
 
-  it('corridor Manhattan distances average ≥ 5 tiles', () => {
+  it('corridor Manhattan distances average >= 5 tiles', () => {
     let totalDist = 0;
     let totalPairs = 0;
     for (let stage = 1; stage <= 3; stage++) {
@@ -167,26 +185,81 @@ describe('Level Generation - Validation', () => {
     expect(avg).toBeGreaterThanOrEqual(5);
   });
 
-  it('keycard is reachable without blue door (keycard not behind blue key door)', () => {
+  it('keycard reachability: yellow reachable without keys, blue only after yellow door, exits only after both', () => {
     for (let stage = 1; stage <= 3; stage++) {
       const level = generateLevel(stage * 900, stage);
-      const kx = Math.floor(level.keycard.x);
-      const ky = Math.floor(level.keycard.y);
-      // Keycard tile itself must be FLOOR, not BLUE_KEY_DOOR
-      expect(level.map[ky][kx]).toBe(TILE.FLOOR);
-      // The keycard should not be placed on the blue door tile
-      const bx = Math.floor(level.enemies[0]?.x ?? 0);
-      // Verify keycard is not at the same tile as any blue door by checking the map
-      // We know the generator ensures reachability, so keycard must be on a FLOOR tile
+      const map = level.map;
+      const spawnX = Math.floor(level.spawn.x);
+      const spawnY = Math.floor(level.spawn.y);
+      const ykx = Math.floor(level.yellowKeycard.x);
+      const yky = Math.floor(level.yellowKeycard.y);
+      const bkx = Math.floor(level.blueKeycard.x);
+      const bky = Math.floor(level.blueKeycard.y);
+
+      // BFS helper
+      function bfs(passable: Set<number>) {
+        const reachable = new Set<string>();
+        const queue: Array<{ x: number; y: number }> = [{ x: spawnX, y: spawnY }];
+        reachable.add(`${spawnX},${spawnY}`);
+        const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+        while (queue.length) {
+          const c = queue.shift()!;
+          for (const [dx, dy] of dirs) {
+            const nx = c.x + dx, ny = c.y + dy;
+            const key = `${nx},${ny}`;
+            if (reachable.has(key)) continue;
+            if (nx < 0 || ny < 0 || nx >= level.width || ny >= level.height) continue;
+            const t = map[ny][nx];
+            if (t === TILE.FLOOR || passable.has(t)) {
+              reachable.add(key);
+              queue.push({ x: nx, y: ny });
+            }
+          }
+        }
+        return reachable;
+      }
+
+      const noKeys = bfs(new Set());
+      const withYellow = bfs(new Set([TILE.YELLOW_KEY_DOOR]));
+      const withBoth = bfs(new Set([TILE.YELLOW_KEY_DOOR, TILE.BLUE_KEY_DOOR]));
+
+      // Yellow keycard reachable without any key
+      expect(noKeys.has(`${ykx},${yky}`)).toBe(true);
+
+      // Blue keycard NOT reachable without yellow door
+      expect(withYellow.has(`${bkx},${bky}`)).toBe(true);
+      expect(noKeys.has(`${bkx},${bky}`)).toBe(false);
+
+      // Exits reachable only with both doors
+      for (const exit of level.exits) {
+        const ex = Math.floor(exit.x);
+        const ey = Math.floor(exit.y);
+        expect(withBoth.has(`${ex},${ey}`)).toBe(true);
+        expect(withYellow.has(`${ex},${ey}`)).toBe(false);
+      }
     }
   });
 
-  it('spawn is on FLOOR tile in room 0 area', () => {
+  it('spawn is on FLOOR tile in first spawn room area', () => {
     for (let stage = 1; stage <= 3; stage++) {
       const level = generateLevel(stage * 1100, stage);
       const sx = Math.floor(level.spawn.x);
       const sy = Math.floor(level.spawn.y);
       expect(level.map[sy][sx]).toBe(TILE.FLOOR);
+    }
+  });
+
+  it('spawnRooms.length >= 2', () => {
+    for (let stage = 1; stage <= 3; stage++) {
+      const level = generateLevel(stage * 1110, stage);
+      expect(level.spawnRooms.length).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('exitRooms.length >= 2', () => {
+    for (let stage = 1; stage <= 3; stage++) {
+      const level = generateLevel(stage * 1120, stage);
+      expect(level.exitRooms.length).toBeGreaterThanOrEqual(2);
     }
   });
 });
@@ -216,17 +289,20 @@ describe('Level Generation - Multi-Stage Differentiation', () => {
     expect(l2.width).toBeGreaterThanOrEqual(l1.width);
     expect(l3.width).toBeGreaterThanOrEqual(l2.width);
     // Floor counts may fluctuate due to random room placement; only check
-    // that they stay in a reasonable band (map grows slowly: +4 tiles total).
-    const floorMargin = 20;
+    // that they stay in a reasonable band.
+    const floorMargin = 100;
     expect(f2).toBeGreaterThanOrEqual(f1 - floorMargin);
     expect(f3).toBeGreaterThanOrEqual(f2 - floorMargin);
   });
 
-  it('enemy count scales with stage', () => {
+  it('enemy count scales with stage (stage 1 >= 12, stage 3 >= 16)', () => {
     const l1 = generateLevel(22222, 1);
     const l2 = generateLevel(22222, 2);
     const l3 = generateLevel(22222, 3);
 
+    expect(l1.enemies.length).toBeGreaterThanOrEqual(12);
+    expect(l2.enemies.length).toBeGreaterThanOrEqual(12);
+    expect(l3.enemies.length).toBeGreaterThanOrEqual(16);
     expect(l3.enemies.length).toBeGreaterThanOrEqual(l2.enemies.length);
     expect(l2.enemies.length).toBeGreaterThanOrEqual(l1.enemies.length);
   });
@@ -261,13 +337,13 @@ describe('Level Generation - Structural Integrity', () => {
     }
   });
 
-  it('exit door tile exists in map', () => {
+  it('yellow key door tile exists in map', () => {
     for (let stage = 1; stage <= 3; stage++) {
-      const level = generateLevel(stage * 1600, stage);
+      const level = generateLevel(stage * 1550, stage);
       let found = false;
       for (const row of level.map) {
         for (const tile of row) {
-          if (tile === TILE.EXIT_DOOR) {
+          if (tile === TILE.YELLOW_KEY_DOOR) {
             found = true;
             break;
           }
@@ -278,11 +354,24 @@ describe('Level Generation - Structural Integrity', () => {
     }
   });
 
-  it('level has at least 5 rooms (minimum floor tiles)', () => {
+  it('exit door tile exists in map (at least 2)', () => {
+    for (let stage = 1; stage <= 3; stage++) {
+      const level = generateLevel(stage * 1600, stage);
+      let count = 0;
+      for (const row of level.map) {
+        for (const tile of row) {
+          if (tile === TILE.EXIT_DOOR) count++;
+        }
+      }
+      expect(count).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('level has sufficient floor tiles for large map', () => {
     for (let stage = 1; stage <= 3; stage++) {
       const level = generateLevel(stage * 1700, stage);
       const floorTiles = level.map.flat().filter(t => t === TILE.FLOOR).length;
-      expect(floorTiles).toBeGreaterThanOrEqual(5 * 12);
+      expect(floorTiles).toBeGreaterThanOrEqual(12 * 12);
     }
   });
 
@@ -350,5 +439,13 @@ describe('Level Generation - Structural Integrity', () => {
     expect(l4.rocketLaunchers.length).toBeGreaterThanOrEqual(1);
     expect(l5.shotguns.length).toBeGreaterThanOrEqual(l4.shotguns.length);
     expect(l5.rocketLaunchers.length).toBeGreaterThanOrEqual(l4.rocketLaunchers.length);
+  });
+
+  it('keycard aliases: exit === exits[0], keycard === blueKeycard', () => {
+    for (let stage = 1; stage <= 3; stage++) {
+      const level = generateLevel(stage * 5050, stage);
+      expect(level.exit).toEqual(level.exits[0]);
+      expect(level.keycard).toEqual(level.blueKeycard);
+    }
   });
 });

@@ -51,7 +51,7 @@ export class SoundManager {
   private musicPlaying: boolean = false;
   private currentTrackIndex: number = 0;
   private trackQueue: number[] = [];
-  private musicVolume: number = 0.3;
+  private musicVolume: number = 0.1;
 
   /**
    * Shuffles track indices using Fisher-Yates and fills the queue.

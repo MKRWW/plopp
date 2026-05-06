@@ -32,7 +32,8 @@ export class TextureManager {
   /**
    * Initialisiert den Textur-Manager und generiert alle Texturen.
    * Wandtyp 1 = Dunkler Stein, Wandtyp 2 = Metall/Gitter,
-   * Wandtyp 3 = Exit-Tür, Wandtyp 4 = Blue Key Door, Wandtyp 5 = Secret Wall.
+   * Wandtyp 3 = Exit-Tür, Wandtyp 4 = Blue Key Door, Wandtyp 5 = Secret Wall,
+   * Wandtyp 6 = Yellow Key Door.
    */
   public initialize(): void {
     if (this.initialized) return;
@@ -42,6 +43,7 @@ export class TextureManager {
     this.textures.set(3, this.generateExitDoorTexture());
     this.textures.set(4, this.generateBlueKeyDoorTexture());
     this.textures.set(5, this.generateSecretWallTexture());
+    this.textures.set(6, this.generateYellowKeyDoorTexture());
     this.floorTexture = this.generateFloorTileTexture();
     this.ceilingTexture = this.generateWoodPanelTexture();
 
@@ -683,6 +685,71 @@ export class TextureManager {
     const imageData = ctx.getImageData(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
     for (let i = 0; i < imageData.data.length; i += 4) {
       const noise = (Math.random() - 0.5) * 12;
+      imageData.data[i] = Math.max(0, Math.min(255, imageData.data[i] + noise));
+      imageData.data[i + 1] = Math.max(0, Math.min(255, imageData.data[i + 1] + noise));
+      imageData.data[i + 2] = Math.max(0, Math.min(255, imageData.data[i + 2] + noise));
+    }
+    ctx.putImageData(imageData, 0, 0);
+
+    return {
+      canvas,
+      width: TEXTURE_SIZE,
+      height: TEXTURE_SIZE,
+      data: ctx.getImageData(0, 0, TEXTURE_SIZE, TEXTURE_SIZE)
+    };
+  }
+
+  /**
+   * Generiert eine Yellow Key Door Textur (Wandtyp 6).
+   * Sci-Fi Metalltür mit gelbem Leuchten und Keycard-Symbol.
+   */
+  private generateYellowKeyDoorTexture(): Texture {
+    const canvas = document.createElement('canvas');
+    canvas.width = TEXTURE_SIZE;
+    canvas.height = TEXTURE_SIZE;
+    const ctx = canvas.getContext('2d')!;
+
+    // Dark warm gray background
+    ctx.fillStyle = '#3a3a2a';
+    ctx.fillRect(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
+
+    // Door frame
+    ctx.fillStyle = '#5a5a4a';
+    ctx.fillRect(4, 4, TEXTURE_SIZE - 8, TEXTURE_SIZE - 8);
+    ctx.fillStyle = '#3a3a2a';
+    ctx.fillRect(8, 8, TEXTURE_SIZE - 16, TEXTURE_SIZE - 16);
+
+    // Yellow glow (keycard detection)
+    const glowGrad = ctx.createRadialGradient(
+      TEXTURE_SIZE / 2, TEXTURE_SIZE / 2, 4,
+      TEXTURE_SIZE / 2, TEXTURE_SIZE / 2, 40
+    );
+    glowGrad.addColorStop(0, 'rgba(255, 200, 50, 0.5)');
+    glowGrad.addColorStop(0.5, 'rgba(255, 200, 50, 0.2)');
+    glowGrad.addColorStop(1, 'rgba(255, 200, 50, 0)');
+    ctx.fillStyle = glowGrad;
+    ctx.fillRect(8, 8, TEXTURE_SIZE - 16, TEXTURE_SIZE - 16);
+
+    // Keycard slot (small slit)
+    ctx.fillStyle = '#111';
+    ctx.fillRect(TEXTURE_SIZE / 2 - 12, TEXTURE_SIZE / 2 + 10, 24, 6);
+    ctx.fillStyle = '#ff0';
+    ctx.fillRect(TEXTURE_SIZE / 2 - 10, TEXTURE_SIZE / 2 + 11, 20, 4);
+
+    // "KEY" text
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 20px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = '#ff0';
+    ctx.shadowBlur = 8;
+    ctx.fillText('KEY', TEXTURE_SIZE / 2, TEXTURE_SIZE / 2 - 10);
+    ctx.shadowBlur = 0;
+
+    // Noise
+    const imageData = ctx.getImageData(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
+    for (let i = 0; i < imageData.data.length; i += 4) {
+      const noise = (Math.random() - 0.5) * 10;
       imageData.data[i] = Math.max(0, Math.min(255, imageData.data[i] + noise));
       imageData.data[i + 1] = Math.max(0, Math.min(255, imageData.data[i + 1] + noise));
       imageData.data[i + 2] = Math.max(0, Math.min(255, imageData.data[i + 2] + noise));

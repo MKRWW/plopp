@@ -13,6 +13,7 @@ export enum SpriteType {
   AMMO = 'ammo',
   HEALTH = 'health',
   KEYCARD = 'keycard',
+  YELLOW_KEYCARD = 'yellow_keycard',
   BARREL = 'barrel',
   TERMINAL = 'terminal',
   LAMP = 'lamp',
@@ -30,6 +31,7 @@ export function isCollectableSprite(type: SpriteType): boolean {
     type === SpriteType.AMMO ||
     type === SpriteType.HEALTH ||
     type === SpriteType.KEYCARD ||
+    type === SpriteType.YELLOW_KEYCARD ||
     type === SpriteType.WEAPON_SHOTGUN ||
     type === SpriteType.WEAPON_ROCKETLAUNCHER
   );

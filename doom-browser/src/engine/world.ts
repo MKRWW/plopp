@@ -8,8 +8,9 @@
  *   3 = Exit-Tür (bleibt immer solide, keine Animation)
  *   4 = Blue Key Door (braucht Keycard, animiert)
  *   5 = Secret Wall (ohne Keycard öffnbar, animiert)
+ *   6 = Yellow Key Door (braucht Yellow Keycard, animiert)
  *
- * Türzustände (für Tile 4 und 5):
+ * Türzustände (für Tile 4, 5, und 6):
  *   { state: 'closed' | 'opening' | 'open', progress: 0..1 }
  *   - closed:    vollständig solide
  *   - opening:   noch solide bis progress > 0.7
@@ -31,6 +32,7 @@ export const TILE = {
   EXIT_DOOR: 3,
   BLUE_KEY_DOOR: 4,
   SECRET_WALL: 5,
+  YELLOW_KEY_DOOR: 6,
 } as const;
 
 /** Live binding: aktuelle Karte. Wird durch `worldState.loadLevel()` ersetzt. */
@@ -41,10 +43,10 @@ export let MAP_HEIGHT = 1;
 /** Tür-Zustände */
 export type DoorState = 'closed' | 'opening' | 'open';
 
-/** Tür-Objekt für dynamische Tiles (4 = Blue Key Door, 5 = Secret Wall) */
+/** Tür-Objekt für dynamische Tiles (4 = Blue Key Door, 5 = Secret Wall, 6 = Yellow Key Door) */
 export interface Door {
-  /** Basis-Typ (4 oder 5) */
-  type: typeof TILE.BLUE_KEY_DOOR | typeof TILE.SECRET_WALL;
+  /** Basis-Typ (4, 5 oder 6) */
+  type: typeof TILE.BLUE_KEY_DOOR | typeof TILE.SECRET_WALL | typeof TILE.YELLOW_KEY_DOOR;
   /** 'closed' | 'opening' | 'open' */
   state: DoorState;
   /** Fortschritt der Animation 0..1 */
@@ -59,6 +61,7 @@ export enum InteractionResult {
   DOOR_OPENING = 1,
   DOOR_LOCKED = 2,
   SECRET_FOUND = 3,
+  YELLOW_DOOR_LOCKED = 4,
 }
 
 /**
@@ -85,7 +88,7 @@ export class WorldState {
     for (let y = 0; y < MAP_HEIGHT; y++) {
       for (let x = 0; x < MAP_WIDTH; x++) {
         const base = WORLD_MAP[y]?.[x];
-        if (base === TILE.BLUE_KEY_DOOR || base === TILE.SECRET_WALL) {
+        if (base === TILE.BLUE_KEY_DOOR || base === TILE.SECRET_WALL || base === TILE.YELLOW_KEY_DOOR) {
           this.doors.set(`${x},${y}`, {
             type: base,
             state: 'closed',
@@ -112,7 +115,7 @@ export class WorldState {
    */
   getTile(x: number, y: number): number {
     const base = WORLD_MAP[y]?.[x] ?? 1;
-    if (base !== TILE.BLUE_KEY_DOOR && base !== TILE.SECRET_WALL) return base;
+    if (base !== TILE.BLUE_KEY_DOOR && base !== TILE.SECRET_WALL && base !== TILE.YELLOW_KEY_DOOR) return base;
 
     const door = this.doors.get(`${x},${y}`);
     if (!door) return base;
@@ -133,16 +136,19 @@ export class WorldState {
   /**
    * Versucht eine Interaktion (E-Taste) am Tile vor dem Spieler.
    */
-  interactAt(x: number, y: number, hasKeycard: boolean): InteractionResult {
+  interactAt(x: number, y: number, hasYellowKeycard: boolean, hasBlueKeycard: boolean): InteractionResult {
     const base = WORLD_MAP[y]?.[x];
-    if (base !== TILE.BLUE_KEY_DOOR && base !== TILE.SECRET_WALL) return InteractionResult.NONE;
+    if (base !== TILE.BLUE_KEY_DOOR && base !== TILE.SECRET_WALL && base !== TILE.YELLOW_KEY_DOOR) return InteractionResult.NONE;
 
     const door = this.doors.get(`${x},${y}`);
     if (!door) return InteractionResult.NONE;
     if (door.state !== 'closed') return InteractionResult.NONE;
 
-    if (door.type === TILE.BLUE_KEY_DOOR && !hasKeycard) {
+    if (door.type === TILE.BLUE_KEY_DOOR && !hasBlueKeycard) {
       return InteractionResult.DOOR_LOCKED;
+    }
+    if (door.type === TILE.YELLOW_KEY_DOOR && !hasYellowKeycard) {
+      return InteractionResult.YELLOW_DOOR_LOCKED;
     }
 
     door.state = 'opening';
@@ -172,7 +178,7 @@ export class WorldState {
   /** Prüft ob ein Tile eine Tür ist (4 oder 5). */
   isDoorTile(x: number, y: number): boolean {
     const base = WORLD_MAP[y]?.[x];
-    return base === TILE.BLUE_KEY_DOOR || base === TILE.SECRET_WALL;
+    return base === TILE.BLUE_KEY_DOOR || base === TILE.SECRET_WALL || base === TILE.YELLOW_KEY_DOOR;
   }
 
   /** Tür an Position erhalten (falls vorhanden). */

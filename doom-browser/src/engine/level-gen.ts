@@ -1,23 +1,17 @@
 /**
- * Procedural level generator: rooms-and-corridors with reachability validation.
+ * Procedural level generator: rooms-and-corridors with dual keycard progression.
  *
  * Pipeline per level:
- *   1. Place N non-overlapping rectangular rooms (1-tile margin between them).
- *   2. Connect them sequentially with L-corridors.
- *   3. Spawn = center of room 0; exit room = the room farthest from spawn (Manhattan).
- *   4. Pick an exit-door wall tile on the exit room's perimeter (must be uncarved
- *      WALL_STONE so it forms a dead-end). Player stands in the floor tile inside
- *      the room and presses [E].
- *   5. Place a BLUE_KEY_DOOR on a corridor tile such that removing it disconnects
- *      spawn from the exit-access cell — i.e. a true chokepoint.
- *   6. Place the keycard in a non-spawn, non-exit room reachable WITHOUT the
- *      blue door open.
- *   7. Optionally embed a 1-tile secret pocket behind a SECRET_WALL with a health
- *      pickup.
- *   8. Scatter enemies, ammo, health, decor across rooms (avoiding spawn/exit/key
- *      cells and a small radius around the player spawn).
- *
- * Difficulty scales with stage: more rooms, more enemies, slightly larger map.
+ *   1. Place N non-overlapping rectangular rooms on a large (32-50x32-50) grid.
+ *   2. Identify spawn rooms (2-3 near top-left) and exit rooms (2-3 farthest).
+ *   3. Connect sequentially with L-corridors, then add cross-corridors.
+ *   4. Place exit doors on each exit room perimeter.
+ *   5. Place YELLOW_KEY_DOOR as chokepoint between spawn cluster and blue key zone.
+ *   6. Place BLUE_KEY_DOOR as chokepoint between blue key zone and exit rooms.
+ *   7. Place yellow keycard reachable WITHOUT any key door.
+ *   8. Place blue keycard reachable only after yellow door is open.
+ *   9. Scatter enemies, ammo, health, decor (excluding spawn/exit rooms).
+ *   10. Validate reachability; retry on failure.
  */
 import { TILE } from './world';
 import { SpriteType } from './sprite';
@@ -38,21 +32,30 @@ export interface Level {
   height: number;
   map: number[][];
   spawn: { x: number; y: number; dirX: number; dirY: number };
-  /** Entrance position: 1 tile INSIDE room 0 from a randomly chosen wall edge. */
   entrance: Vec2;
-  /** Center of the EXIT_DOOR wall tile — player checks distance to this. */
+  /** Room indices forming the entrance cluster (2-3 rooms near each other). */
+  spawnRooms: number[];
+  /** Exit door positions — one per exit room. */
+  exits: Vec2[];
+  /** Room indices of the exit rooms (2-3 rooms in farthest corners). */
+  exitRooms: number[];
+  /** Kept for backwards compatibility: points to exits[0]. */
   exit: Vec2;
+  /** New: Yellow keycard position (reachable from spawn without any keycard). */
+  yellowKeycard: Vec2;
+  /** Blue keycard position (reachable only after opening yellow key door). */
+  blueKeycard: Vec2;
+  /** Kept for backwards compatibility: points to blueKeycard. */
   keycard: Vec2;
   enemies: Vec2[];
   ammo: Vec2[];
   health: Vec2[];
-  /** Bonus pickup behind a SECRET_WALL, if a secret room was placed. */
   secretHealth: Vec2 | null;
   decor: DecorPlacement[];
-  /** Shotgun weapon pickups (appear from stage 2 onwards). */
   shotguns: Vec2[];
-  /** Rocket Launcher weapon pickups (appear from stage 4 onwards). */
   rocketLaunchers: Vec2[];
+  /** Exposed Room data for validation/debugging. Array of {x, y, w, h}. */
+  rooms: Array<{ x: number; y: number; w: number; h: number }>;
 }
 
 interface Room { x: number; y: number; w: number; h: number; }
@@ -117,12 +120,14 @@ function carveCorridor(map: number[][], a: Vec2, b: Vec2, rng: () => number): vo
     carveH(map, a.x, b.x, b.y);
   }
 }
+
 function carveH(map: number[][], x1: number, x2: number, y: number): void {
   const lo = Math.min(x1, x2), hi = Math.max(x1, x2);
   for (let x = lo; x <= hi; x++) {
     if (map[y][x] === TILE.WALL_STONE) map[y][x] = TILE.FLOOR;
   }
 }
+
 function carveV(map: number[][], y1: number, y2: number, x: number): void {
   const lo = Math.min(y1, y2), hi = Math.max(y1, y2);
   for (let y = lo; y <= hi; y++) {
@@ -159,80 +164,76 @@ function bfsReachable(map: number[][], start: Vec2, passableExtras: Set<number>)
 }
 
 /**
- * Pick an entrance position on room 0's perimeter: randomly choose a wall edge
- * (top, bottom, left, or right), then return a position 1 tile INSIDE from that wall.
- * This position becomes the "entrance" marker.
+ * Check if a cell is reachable from start given the reachable grid.
  */
-function pickEntrancePosition(
-  room: Room,
-  rng: () => number
-): Vec2 {
-  const choice = Math.floor(rng() * 4); // 0=top, 1=bottom, 2=left, 3=right
-  
+function isReachable(reachable: boolean[][], target: Vec2): boolean {
+  const w = reachable[0].length, h = reachable.length;
+  if (target.x < 0 || target.y < 0 || target.x >= w || target.y >= h) return false;
+  return reachable[target.y][target.x];
+}
+
+function shuffle<T>(arr: T[], rng: () => number): void {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
+function manhattan(a: Vec2, b: Vec2): number {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+}
+
+/**
+ * Pick an entrance position on a room's perimeter. Returns a position 1 tile
+ * inside from a randomly chosen wall edge.
+ */
+function pickEntrancePosition(room: Room, rng: () => number): Vec2 {
+  const choice = Math.floor(rng() * 4);
   switch (choice) {
-    case 0: // Top wall: pick random x in [room.x, room.x + room.w), y = room.y + 1 (1 tile inside)
-      return {
-        x: room.x + Math.floor(rng() * room.w),
-        y: room.y + 1
-      };
-    case 1: // Bottom wall: pick random x in [room.x, room.x + room.w), y = room.y + room.h - 2 (1 tile inside)
-      return {
-        x: room.x + Math.floor(rng() * room.w),
-        y: room.y + room.h - 2
-      };
-    case 2: // Left wall: pick random y in [room.y, room.y + room.h), x = room.x + 1 (1 tile inside)
-      return {
-        x: room.x + 1,
-        y: room.y + Math.floor(rng() * room.h)
-      };
-    case 3: // Right wall: pick random y in [room.y, room.y + room.h), x = room.x + room.w - 2 (1 tile inside)
-      return {
-        x: room.x + room.w - 2,
-        y: room.y + Math.floor(rng() * room.h)
-      };
+    case 0:
+      return { x: room.x + Math.floor(rng() * room.w), y: room.y + 1 };
+    case 1:
+      return { x: room.x + Math.floor(rng() * room.w), y: room.y + room.h - 2 };
+    case 2:
+      return { x: room.x + 1, y: room.y + Math.floor(rng() * room.h) };
+    case 3:
+      return { x: room.x + room.w - 2, y: room.y + Math.floor(rng() * room.h) };
     default:
       return { x: room.x, y: room.y };
   }
 }
 
 /**
- * Pick a wall tile on the exit room perimeter that is currently WALL_STONE
- * (i.e. uncarved by any corridor). The tile becomes EXIT_DOOR; the floor tile
- * just inside the room becomes the player's "exit access" position.
- *
- * Returns both: the wall tile and the adjacent inside floor tile.
+ * Pick a wall tile on the room perimeter that is currently WALL_STONE
+ * (i.e. uncarved by any corridor). Returns both wall tile and inside floor tile.
  */
 function pickExitDoor(
   map: number[][],
   room: Room,
+  roomIdx: number,
   rng: () => number
-): { wall: Vec2; access: Vec2 } | null {
-  type Cand = { wall: Vec2; access: Vec2 };
+): { wall: Vec2; access: Vec2; roomIdx: number } | null {
+  type Cand = { wall: Vec2; access: Vec2; roomIdx: number };
   const cands: Cand[] = [];
   const h = map.length, w = map[0].length;
   const tryAdd = (wx: number, wy: number, ax: number, ay: number) => {
     if (wx < 0 || wy < 0 || wx >= w || wy >= h) return;
-    if (map[wy][wx] !== TILE.WALL_STONE) return; // must be uncarved
-    if (map[ay][ax] !== TILE.FLOOR) return;      // inside must be floor
-    // Die anderen drei Nachbarn der Wand MÜSSEN Wand sein. Sonst bekäme der
-    // Spieler die Exit-Tür auch von außen erreicht (Korridor läuft direkt am
-    // Exit-Tile vorbei) und könnte die Blue-Door umgehen.
+    if (map[wy][wx] !== TILE.WALL_STONE) return;
+    if (map[ay][ax] !== TILE.FLOOR) return;
     const dirs: Array<[number, number]> = [[1, 0], [-1, 0], [0, 1], [0, -1]];
     for (const [dx, dy] of dirs) {
       const nx = wx + dx, ny = wy + dy;
       if (nx === ax && ny === ay) continue;
       if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-      if (map[ny][nx] !== TILE.WALL_STONE) return; // anderer Nachbar ist Floor → ungeeignet
+      if (map[ny][nx] !== TILE.WALL_STONE) return;
     }
-    cands.push({ wall: { x: wx, y: wy }, access: { x: ax, y: ay } });
+    cands.push({ wall: { x: wx, y: wy }, access: { x: ax, y: ay }, roomIdx });
   };
 
-  // Top + bottom edges
   for (let x = room.x; x < room.x + room.w; x++) {
     tryAdd(x, room.y - 1, x, room.y);
     tryAdd(x, room.y + room.h, x, room.y + room.h - 1);
   }
-  // Left + right edges
   for (let y = room.y; y < room.y + room.h; y++) {
     tryAdd(room.x - 1, y, room.x, y);
     tryAdd(room.x + room.w, y, room.x + room.w - 1, y);
@@ -243,54 +244,89 @@ function pickExitDoor(
 }
 
 /**
- * Find a corridor cell whose conversion to BLUE_KEY_DOOR forms a true chokepoint
- * between spawn and the exit-access cell.
+ * Find corridor cells (floor cells NOT inside any room).
  */
-function placeBlueDoor(
-  map: number[][],
-  spawn: Vec2,
-  exitAccess: Vec2,
-  rooms: Room[],
-  rng: () => number
-): Vec2 | null {
+function getCorridorCells(map: number[][], rooms: Room[]): Vec2[] {
   const h = map.length, w = map[0].length;
-  const corridorCells: Vec2[] = [];
+  const cells: Vec2[] = [];
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       if (map[y][x] !== TILE.FLOOR) continue;
       if (rooms.some(r => pointInRoom(x, y, r))) continue;
-      corridorCells.push({ x, y });
+      cells.push({ x, y });
     }
   }
-  // Shuffle for variety
+  return cells;
+}
+
+/**
+ * Place a YELLOW_KEY_DOOR on a corridor cell between spawn area and the
+ * blueKeyCandidateRoom. Must be a true chokepoint: removing it disconnects
+ * blueKeyCandidateRoom from spawn when yellow door is blocked.
+ */
+function placeYellowDoor(
+  map: number[][],
+  spawn: Vec2,
+  blueKeyCandidateRoom: Room,
+  rooms: Room[],
+  rng: () => number
+): Vec2 | null {
+  const corridorCells = getCorridorCells(map, rooms);
   shuffle(corridorCells, rng);
+  const targetCenter = roomCenter(blueKeyCandidateRoom);
 
   for (const c of corridorCells) {
-    map[c.y][c.x] = TILE.BLUE_KEY_DOOR;
-    const noBlue = bfsReachable(map, spawn, new Set());
-    const withBlue = bfsReachable(map, spawn, new Set([TILE.BLUE_KEY_DOOR]));
+    map[c.y][c.x] = TILE.YELLOW_KEY_DOOR;
+    const noYellow = bfsReachable(map, spawn, new Set());
+    const withYellow = bfsReachable(map, spawn, new Set([TILE.YELLOW_KEY_DOOR]));
     const isChoke =
-      !noBlue[exitAccess.y][exitAccess.x] && withBlue[exitAccess.y][exitAccess.x];
+      !isReachable(noYellow, targetCenter) && isReachable(withYellow, targetCenter);
     if (isChoke) return c;
-    map[c.y][c.x] = TILE.FLOOR; // revert
+    map[c.y][c.x] = TILE.FLOOR;
   }
   return null;
 }
 
-function shuffle<T>(arr: T[], rng: () => number): void {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
+/**
+ * Find a BLUE_KEY_DOOR corridor cell between the blue keycard room and the
+ * exit access cells. Must be a true chokepoint: removing it disconnects
+ * ALL exit access cells from spawn when blue door is blocked (even with
+ * yellow door open).
+ *
+ * @param exitAccessCells array of floor cells inside exit rooms that lead to exit doors
+ */
+function placeBlueDoor(
+  map: number[][],
+  spawn: Vec2,
+  exitAccessCells: Vec2[],
+  rooms: Room[],
+  rng: () => number
+): Vec2 | null {
+  const corridorCells = getCorridorCells(map, rooms);
+  shuffle(corridorCells, rng);
+
+  for (const c of corridorCells) {
+    map[c.y][c.x] = TILE.BLUE_KEY_DOOR;
+    // With both doors open, all exit access cells must be reachable
+    const withBoth = bfsReachable(map, spawn, new Set([TILE.YELLOW_KEY_DOOR, TILE.BLUE_KEY_DOOR]));
+    // With only yellow door open, ALL exit access cells must be unreachable
+    const noBlue = bfsReachable(map, spawn, new Set([TILE.YELLOW_KEY_DOOR]));
+
+    let allBlocked = true;
+    let allReachableWithBoth = true;
+    for (const ea of exitAccessCells) {
+      if (isReachable(noBlue, ea)) { allBlocked = false; break; }
+      if (!isReachable(withBoth, ea)) { allReachableWithBoth = false; break; }
+    }
+    if (allBlocked && allReachableWithBoth) return c;
+    map[c.y][c.x] = TILE.FLOOR;
   }
+  return null;
 }
 
 /**
  * Pick a room from candidates using a weighted random selection biased toward
- * greater Manhattan distance from spawnCenter. Each room's selection weight is
- * its Manhattan distance from spawnCenter. If all candidates have distance 0,
- * falls back to uniform random.
- *
- * @returns A { room, distance } pair, or null if candidates is empty.
+ * greater Manhattan distance from reference point.
  */
 function weightedRandomByDistance(
   candidates: Array<{ room: Room; distance: number }>,
@@ -299,8 +335,7 @@ function weightedRandomByDistance(
   if (candidates.length === 0) return null;
   const totalWeight = candidates.reduce((sum, c) => sum + c.distance, 0);
   if (totalWeight === 0) {
-    const pick = candidates[Math.floor(rng() * candidates.length)];
-    return pick;
+    return candidates[Math.floor(rng() * candidates.length)];
   }
   let threshold = rng() * totalWeight;
   for (const c of candidates) {
@@ -311,13 +346,33 @@ function weightedRandomByDistance(
 }
 
 /**
- * Pick a floor tile in one of the four corners of the room. A "corner tile" is
- * a floor tile that is adjacent to both walls meeting at a corner (i.e. 1 tile
- * inside from each of the two walls). Among all valid corner tiles across all
- * 4 corners, pick one uniformly at random. Returns null if no corner tile is
- * available (room too small — min 3x3).
- *
- * Falls back to roomCenter() if no corner tile found (safety net).
+ * Inverse-weighted: rooms closer to reference get higher weight.
+ */
+function weightedRandomByProximity(
+  candidates: Array<{ room: Room; distance: number }>,
+  maxDist: number,
+  rng: () => number
+): { room: Room; distance: number } | null {
+  if (candidates.length === 0) return null;
+  const maxW = maxDist + 1;
+  const weighted = candidates.map(c => ({
+    room: c.room,
+    distance: c.distance,
+    weight: Math.max(1, maxW - c.distance),
+  }));
+  const totalWeight = weighted.reduce((sum, c) => sum + c.weight, 0);
+  if (totalWeight === 0) return candidates[Math.floor(rng() * candidates.length)];
+  let threshold = rng() * totalWeight;
+  for (const c of weighted) {
+    threshold -= c.weight;
+    if (threshold <= 0) return { room: c.room, distance: c.distance };
+  }
+  const last = candidates[candidates.length - 1];
+  return { room: last.room, distance: last.distance };
+}
+
+/**
+ * Pick a floor tile in one of the four corners of the room.
  */
 function pickCornerTile(
   room: Room,
@@ -343,7 +398,6 @@ function pickCornerTile(
       if (map[ty][tx] !== TILE.FLOOR) continue;
       const key = `${tx},${ty}`;
       if (used.has(key)) continue;
-      // Ensure at least one cardinal neighbor is non-FLOOR (wall-adjacency for corner property)
       const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const;
       let adjWall = false;
       for (const [ddx, ddy] of dirs) {
@@ -369,14 +423,12 @@ function pickCornerTile(
 
 /**
  * Find a free floor tile adjacent (within Chebyshev distance 2) to the
- * keycard tile, within the same room, not yet used. Returns the tile or null.
- * Expanded from distance 1 to handle 3x3 rooms where the keycard is in a
- * corner and all distance-1 neighbors are walls.
+ * reference tile, within the same room, not yet used.
  */
 function placeCoverDecor(
   room: Room,
   map: number[][],
-  keycardTile: Vec2,
+  refTile: Vec2,
   rng: () => number,
   used: Set<string>
 ): Vec2 | null {
@@ -384,7 +436,7 @@ function placeCoverDecor(
   for (let dy = -2; dy <= 2; dy++) {
     for (let dx = -2; dx <= 2; dx++) {
       if (dx === 0 && dy === 0) continue;
-      const nx = keycardTile.x + dx, ny = keycardTile.y + dy;
+      const nx = refTile.x + dx, ny = refTile.y + dy;
       if (nx < room.x || nx >= room.x + room.w || ny < room.y || ny >= room.y + room.h) continue;
       if (map[ny][nx] !== TILE.FLOOR) continue;
       if (used.has(`${nx},${ny}`)) continue;
@@ -398,9 +450,7 @@ function placeCoverDecor(
 }
 
 /**
- * Try to embed a 1x1 secret pocket: a wall tile on a room's perimeter that has
- * solid wall on its outside neighbor. Convert the wall to SECRET_WALL, the
- * outside neighbor to FLOOR, and place a health bonus there.
+ * Try to embed a 1x1 secret pocket behind a SECRET_WALL.
  */
 function placeSecretRoom(
   map: number[][],
@@ -416,11 +466,10 @@ function placeSecretRoom(
       if (px <= 0 || py <= 0 || px >= w - 1 || py >= h - 1) return;
       if (map[wy][wx] !== TILE.WALL_STONE) return;
       if (map[py][px] !== TILE.WALL_STONE) return;
-      // Pocket must not touch any other floor (so it's truly hidden)
       const dirs: Array<[number, number]> = [[1, 0], [-1, 0], [0, 1], [0, -1]];
       for (const [dx, dy] of dirs) {
         const nx = px + dx, ny = py + dy;
-        if (nx === wx && ny === wy) continue; // ignore the secret-wall side
+        if (nx === wx && ny === wy) continue;
         if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
         if (map[ny][nx] !== TILE.WALL_STONE) return;
       }
@@ -444,8 +493,7 @@ function placeSecretRoom(
 }
 
 /**
- * Pick a random floor tile inside a room, optionally avoiding tiles already used
- * (by exact tile coords).
+ * Pick a random floor tile inside a room, avoiding used tile coords.
  */
 function randomFloorInRoom(
   room: Room,
@@ -487,27 +535,89 @@ function spawnFacing(spawnRoom: Room, spawn: Vec2): { dirX: number; dirY: number
 }
 
 /**
+ * Compute the centroid of a set of Vec2.
+ */
+function centroid(positions: Vec2[]): Vec2 {
+  if (positions.length === 0) return { x: 0, y: 0 };
+  let sx = 0, sy = 0;
+  for (const p of positions) { sx += p.x; sy += p.y; }
+  return { x: sx / positions.length, y: sy / positions.length };
+}
+
+/**
+ * Place items in a set of rooms, avoiding rooms whose indices are in excludeSet.
+ * Each item is placed in a random floor tile of a randomly chosen eligible room.
+ */
+function placeItemsInRooms(
+  map: number[][],
+  rooms: Room[],
+  excludeIndices: Set<number>,
+  count: number,
+  rng: () => number,
+  used: Set<string>
+): Vec2[] {
+  const eligible = rooms.filter((_, i) => !excludeIndices.has(i));
+  if (eligible.length === 0) return [];
+  const result: Vec2[] = [];
+  for (let i = 0; i < count; i++) {
+    const room = eligible[Math.floor(rng() * eligible.length)];
+    const tile = randomFloorInRoom(room, rng, used);
+    if (!tile) continue;
+    result.push({ x: tile.x + 0.5, y: tile.y + 0.5 });
+  }
+  return result;
+}
+
+/**
+ * Place decor items in a set of rooms.
+ */
+function placeDecorInRooms(
+  map: number[][],
+  rooms: Room[],
+  excludeIndices: Set<number>,
+  count: number,
+  rng: () => number,
+  used: Set<string>
+): DecorPlacement[] {
+  const eligible = rooms.filter((_, i) => !excludeIndices.has(i));
+  if (eligible.length === 0) return [];
+  const result: DecorPlacement[] = [];
+  for (let i = 0; i < count; i++) {
+    const room = eligible[Math.floor(rng() * eligible.length)];
+    const tile = randomFloorInRoom(room, rng, used);
+    if (!tile) continue;
+    const type = DECOR_TYPES[Math.floor(rng() * DECOR_TYPES.length)];
+    result.push({ x: tile.x + 0.5, y: tile.y + 0.5, type });
+  }
+  return result;
+}
+
+/**
  * Generate a level for `stage` using `seed`. Retries internally on validation
  * failure; throws if it can't produce a valid level after MAX_ATTEMPTS.
  */
 export function generateLevel(seed: number, stage: number): Level {
   const rng = mulberry32(seed ^ (stage * 0x9E3779B9));
 
-  const W = clamp(16 + Math.floor(stage / 2), 16, 24);
+  // Step 3b: map sizing
+  const W = clamp(32 + Math.floor(stage / 2) * 2, 32, 50);
   const H = W;
-  const targetRooms = clamp(5 + Math.floor(stage / 2), 5, 9);
-  const minRooms = 4;
+  const targetRooms = clamp(12 + Math.floor(stage * 1.5), 12, 30);
+  const minRooms = 8;
+  const numSpawnRooms = stage >= 5 ? 3 : 2;
+  const numExitRooms = stage >= 5 ? 3 : 2;
 
-  const MAX_ATTEMPTS = 50;
+  const MAX_ATTEMPTS = 80;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const map = newGrid(W, H, TILE.WALL_STONE);
     const rooms: Room[] = [];
 
-    for (let i = 0; i < 200 && rooms.length < targetRooms; i++) {
-      const rw = 3 + Math.floor(rng() * 4); // 3..6
-      const rh = 3 + Math.floor(rng() * 4);
-      const rx = 1 + Math.floor(rng() * (W - rw - 2));
-      const ry = 1 + Math.floor(rng() * (H - rh - 2));
+    // Room placement: slightly larger rooms for big maps (4-8 range)
+    for (let i = 0; i < 500 && rooms.length < targetRooms; i++) {
+      const rw = 3 + Math.floor(rng() * 5); // 3..7
+      const rh = 3 + Math.floor(rng() * 5);
+      const rx = 1 + Math.floor(rng() * Math.max(1, W - rw - 2));
+      const ry = 1 + Math.floor(rng() * Math.max(1, H - rh - 2));
       const r: Room = { x: rx, y: ry, w: rw, h: rh };
       if (rooms.some(o => roomsOverlap(o, r, 1))) continue;
       rooms.push(r);
@@ -515,141 +625,248 @@ export function generateLevel(seed: number, stage: number): Level {
     }
     if (rooms.length < minRooms) continue;
 
-    // Connect sequentially: room[i] ↔ room[i+1] via L-corridor through centers.
+    // Step 3c: Multi-entrance room selection
+    // Pick room closest to top-left (1,1) as first spawn room, swap to index 0
+    let bestSpawnIdx = 0;
+    let bestSpawnDist = manhattan(roomCenter(rooms[0]), { x: 1, y: 1 });
+    for (let i = 1; i < rooms.length; i++) {
+      const d = manhattan(roomCenter(rooms[i]), { x: 1, y: 1 });
+      if (d < bestSpawnDist) {
+        bestSpawnDist = d;
+        bestSpawnIdx = i;
+      }
+    }
+    // Swap bestSpawnIdx to index 0
+    [rooms[0], rooms[bestSpawnIdx]] = [rooms[bestSpawnIdx], rooms[0]];
+
+    // Greedily pick next numSpawnRooms-1 by closest center distance to rooms[0]
+    const spawnRoomCenters: Vec2[] = [roomCenter(rooms[0])];
+    for (let s = 1; s < numSpawnRooms && s < rooms.length; s++) {
+      let bestIdx = s;
+      let bestDist = Infinity;
+      for (let i = s; i < rooms.length; i++) {
+        const d = manhattan(roomCenter(rooms[i]), spawnRoomCenters[0]);
+        if (d < bestDist) {
+          bestDist = d;
+          bestIdx = i;
+        }
+      }
+      [rooms[s], rooms[bestIdx]] = [rooms[bestIdx], rooms[s]];
+      spawnRoomCenters.push(roomCenter(rooms[s]));
+    }
+    const spawnRoomIndices = Array.from({ length: numSpawnRooms }, (_, i) => i);
+
+    // Step 3d: Multi-exit room selection
+    // Pick rooms farthest from spawn cluster centroid
+    const spawnCentroid = centroid(spawnRoomCenters);
+    const exitCandidates = rooms
+      .map((r, i) => ({
+        idx: i,
+        dist: manhattan(roomCenter(r), spawnCentroid),
+      }))
+      .filter(c => !spawnRoomIndices.includes(c.idx))
+      .sort((a, b) => b.dist - a.dist);
+
+    // Move farthest exit rooms to the END of the rooms array via swaps
+    const chosenExitCount = Math.min(numExitRooms, exitCandidates.length);
+    for (let e = 0; e < chosenExitCount; e++) {
+      const targetPos = rooms.length - (chosenExitCount - e);
+      if (exitCandidates[e].idx < targetPos) {
+        [rooms[exitCandidates[e].idx], rooms[targetPos]] = [rooms[targetPos], rooms[exitCandidates[e].idx]];
+      }
+    }
+    const exitRoomIndices = Array.from({ length: chosenExitCount }, (_, i) => rooms.length - 1 - i);
+
+    // Connect sequentially with L-corridors
     for (let i = 1; i < rooms.length; i++) {
       carveCorridor(map, roomCenter(rooms[i - 1]), roomCenter(rooms[i]), rng);
     }
 
+    // Step 3e: Cross-corridors (1-3 between non-adjacent middle zone rooms with Manhattan distance > 3)
+    const numCrossCorridors = clamp(1 + Math.floor(stage / 3), 1, 3);
+    const middleZoneIndices: number[] = [];
+    for (let i = 0; i < rooms.length; i++) {
+      if (!spawnRoomIndices.includes(i) && !exitRoomIndices.includes(i)) {
+        middleZoneIndices.push(i);
+      }
+    }
+
+    let crossCount = 0;
+    const crossPairs: Array<[number, number]> = [];
+    const usedPairs = new Set<string>();
+    for (let tryI = 0; tryI < 50 && crossCount < numCrossCorridors; tryI++) {
+      const a = middleZoneIndices[Math.floor(rng() * middleZoneIndices.length)];
+      const b = middleZoneIndices[Math.floor(rng() * middleZoneIndices.length)];
+      if (a === b) continue;
+      const pairKey = Math.min(a, b) + ',' + Math.max(a, b);
+      if (usedPairs.has(pairKey)) continue;
+      const ca = roomCenter(rooms[a]), cb = roomCenter(rooms[b]);
+      if (manhattan(ca, cb) <= 3) continue;
+      usedPairs.add(pairKey);
+      crossPairs.push([a, b]);
+      carveCorridor(map, ca, cb, rng);
+      crossCount++;
+    }
+
+    // Step 3f: Exit doors
+    const exits: Vec2[] = [];
+    const exitAccessCells: Vec2[] = [];
+    for (const ei of exitRoomIndices) {
+      const exitRoom = rooms[ei];
+      const exitDoor = pickExitDoor(map, exitRoom, ei, rng);
+      if (!exitDoor) continue; // if no valid door on this room, skip it for now
+      map[exitDoor.wall.y][exitDoor.wall.x] = TILE.EXIT_DOOR;
+      exits.push({ x: exitDoor.wall.x + 0.5, y: exitDoor.wall.y + 0.5 });
+      exitAccessCells.push(exitDoor.access);
+    }
+    if (exits.length === 0) continue;
+
+    // Spawn position: center of room 0
     const spawnRoom = rooms[0];
     const spawnTile = roomCenter(spawnRoom);
     const spawn: Vec2 = { x: spawnTile.x, y: spawnTile.y };
 
-    // Entrance: pick a random wall edge of room 0, 1 tile inside
+    // Entrance: pick wall edge in first spawn room
     const entranceTile = pickEntrancePosition(spawnRoom, rng);
-    const entrance: Vec2 = { x: entranceTile.x, y: entranceTile.y };
+    const entrance: Vec2 = { x: entranceTile.x + 0.5, y: entranceTile.y + 0.5 };
 
-    // Exit room = farthest from spawn (Manhattan).
-    let exitIdx = -1, bestDist = -1;
-    for (let i = 1; i < rooms.length; i++) {
-      const c = roomCenter(rooms[i]);
-      const d = Math.abs(c.x - spawn.x) + Math.abs(c.y - spawn.y);
-      if (d > bestDist) { bestDist = d; exitIdx = i; }
-    }
-    if (exitIdx < 0) continue;
-    const exitRoom = rooms[exitIdx];
+    // --- Yellow Key Door placement (step 3g) ---
+    // Pick a room from the middle zone as the "blue key candidate" (where blue keycard will go)
+    // It should be far enough from spawn to require the yellow door
+    const middleZoneRooms = middleZoneIndices.map((_, ai) => rooms[middleZoneIndices[ai]]);
+    // Weight the selection by distance from spawnCentroid - want it somewhat far
+    const blueKeyRoomCandidates = middleZoneRooms.map(r => ({
+      room: r,
+      distance: manhattan(roomCenter(r), spawnCentroid),
+    }));
+    const blueKeyPick = weightedRandomByDistance(blueKeyRoomCandidates, rng);
+    if (!blueKeyPick) continue;
+    const blueKeyCandidateRoom = blueKeyPick.room;
 
-    const exitDoor = pickExitDoor(map, exitRoom, rng);
-    if (!exitDoor) continue;
-    map[exitDoor.wall.y][exitDoor.wall.x] = TILE.EXIT_DOOR;
+    const yellowPos = placeYellowDoor(map, spawn, blueKeyCandidateRoom, rooms, rng);
+    if (!yellowPos) continue;
 
-    const bluePos = placeBlueDoor(map, spawn, exitDoor.access, rooms, rng);
+    // Step 3h: Blue Key Door placement
+    const bluePos = placeBlueDoor(map, spawn, exitAccessCells, rooms, rng);
     if (!bluePos) continue;
-    // bluePos already mutated map to BLUE_KEY_DOOR.
 
-    // Keycard: pick a non-spawn, non-exit room reachable WITHOUT blue door (with distance bias + corner placement).
-    const reachableNoBlue = bfsReachable(map, spawn, new Set());
-    const reachableRooms = rooms
+    // Step 3i: Keycard placement
+    // Yellow keycard: reachable WITHOUT any key door
+    const reachableNoKeys = bfsReachable(map, spawn, new Set());
+
+    // Find non-spawn, non-exit rooms reachable without any key
+    const yellowCandidates = rooms
       .map((r, i) => ({
         room: r,
-        i,
-        distance: Math.abs(roomCenter(r).x - spawn.x) + Math.abs(roomCenter(r).y - spawn.y),
+        idx: i,
+        distance: manhattan(roomCenter(r), spawn),
       }))
-      .filter(({ i, room }) =>
-        i !== 0 &&
-        i !== exitIdx &&
-        reachableNoBlue[room.y + Math.floor(room.h / 2)][room.x + Math.floor(room.w / 2)]
+      .filter(c =>
+        !spawnRoomIndices.includes(c.idx) &&
+        !exitRoomIndices.includes(c.idx) &&
+        isReachable(reachableNoKeys, roomCenter(c.room))
       );
 
-    if (reachableRooms.length === 0) continue;
+    // Weighted by proximity to spawn (closer = higher weight = more likely picked)
+    const maxYellowDist = yellowCandidates.length > 0
+      ? Math.max(...yellowCandidates.map(c => c.distance))
+      : 0;
+    const yellowPick = weightedRandomByProximity(yellowCandidates, maxYellowDist, rng);
+    if (!yellowPick) continue;
 
-    const picked = weightedRandomByDistance(reachableRooms, rng);
-    if (!picked) continue;
+    // Blue keycard: reachable only with YELLOW_KEY_DOOR passable (not BLUE_KEY_DOOR)
+    const reachableWithYellow = bfsReachable(map, spawn, new Set([TILE.YELLOW_KEY_DOOR]));
+    const reachableNoYellow = bfsReachable(map, spawn, new Set());
 
-    // From here generation succeeded structurally. Place sprites.
-    const used = new Set<string>(); // moved before keycard so pickCornerTile can reserve the tile; shifts downstream RNG but stays deterministic
+    const blueCandidates = rooms
+      .map((r, i) => ({
+        room: r,
+        idx: i,
+        distance: manhattan(roomCenter(r), spawn),
+      }))
+      .filter(c =>
+        !spawnRoomIndices.includes(c.idx) &&
+        !exitRoomIndices.includes(c.idx) &&
+        !isReachable(reachableNoYellow, roomCenter(c.room)) &&
+        isReachable(reachableWithYellow, roomCenter(c.room))
+      );
+
+    if (blueCandidates.length === 0) continue;
+    const maxBlueDist = Math.max(...blueCandidates.map(c => c.distance));
+    const bluePick = weightedRandomByProximity(blueCandidates, maxBlueDist, rng);
+    if (!bluePick) continue;
+
+    // --- From here generation succeeded structurally. Place sprites. ---
+    const used = new Set<string>();
     used.add(`${spawnTile.x},${spawnTile.y}`);
-    used.add(`${exitDoor.access.x},${exitDoor.access.y}`);
+    for (const ea of exitAccessCells) {
+      used.add(`${ea.x},${ea.y}`);
+    }
 
-    const keycardRoom = picked.room;
-    const keycardTile = pickCornerTile(keycardRoom, map, rng, used);
+    // Place yellow keycard in corner of its room
+    const yellowKeycardTile = pickCornerTile(yellowPick.room, map, rng, used);
+    // Place blue keycard in corner of its room
+    const blueKeycardTile = pickCornerTile(bluePick.room, map, rng, used);
 
-    // Cover decor: place one decorative sprite adjacent to keycard
+    // Cover decor: place one decorative sprite adjacent to each keycard
     const decor: DecorPlacement[] = [];
-    const coverTile = placeCoverDecor(keycardRoom, map, keycardTile, rng, used);
-    if (coverTile) {
-      const coverTypes = [SpriteType.BARREL, SpriteType.DEBRIS, SpriteType.TERMINAL];
+    const cover1 = placeCoverDecor(yellowPick.room, map, yellowKeycardTile, rng, used);
+    if (cover1) {
+      const coverTypes: DecorType[] = [SpriteType.BARREL, SpriteType.DEBRIS, SpriteType.TERMINAL];
       const coverType = coverTypes[Math.floor(rng() * 3)];
-      decor.push({ x: coverTile.x + 0.5, y: coverTile.y + 0.5, type: coverType });
+      decor.push({ x: cover1.x + 0.5, y: cover1.y + 0.5, type: coverType });
+    }
+    const cover2 = placeCoverDecor(bluePick.room, map, blueKeycardTile, rng, used);
+    if (cover2) {
+      const coverTypes: DecorType[] = [SpriteType.BARREL, SpriteType.DEBRIS, SpriteType.TERMINAL];
+      const coverType = coverTypes[Math.floor(rng() * 3)];
+      decor.push({ x: cover2.x + 0.5, y: cover2.y + 0.5, type: coverType });
     }
 
-    // Optional secret room (50% on stage 2+, otherwise skipped).
+    // Optional secret rooms (increased probability for stage 2+)
+    const secretProb = stage >= 2 ? 0.8 : 0.4;
+    const numSecretAttempts = stage >= 2 ? 3 : 1;
     let secretHealth: Vec2 | null = null;
-    if (stage >= 2 && rng() < 0.7) {
-      secretHealth = placeSecretRoom(map, rooms, rng, used);
+    for (let s = 0; s < numSecretAttempts; s++) {
+      if (rng() < secretProb) {
+        secretHealth = placeSecretRoom(map, rooms, rng, used);
+        if (secretHealth) break;
+      }
     }
 
-    // --- Enemies (in non-spawn rooms; minimum distance from spawn). ---
-    const numEnemies = clamp(4 + Math.floor(stage * 1.2), 4, 14);
-    const enemies: Vec2[] = [];
-    const nonSpawnRooms = rooms.filter((_, i) => i !== 0);
-    for (let i = 0; i < numEnemies; i++) {
-      const room = nonSpawnRooms[Math.floor(rng() * nonSpawnRooms.length)];
-      const tile = randomFloorInRoom(room, rng, used);
-      if (!tile) continue;
-      enemies.push({ x: tile.x + 0.5, y: tile.y + 0.5 });
-    }
+    // Step 3j: Scaled quantities
+    const excludeSpawnExit = new Set<number>();
+    for (const i of spawnRoomIndices) excludeSpawnExit.add(i);
+    for (const i of exitRoomIndices) excludeSpawnExit.add(i);
 
-    // --- Ammo & health ---
-    const numAmmo = 2 + Math.floor(stage / 2);
-    const ammo: Vec2[] = [];
-    for (let i = 0; i < numAmmo; i++) {
-      const room = rooms[Math.floor(rng() * rooms.length)];
-      const tile = randomFloorInRoom(room, rng, used);
-      if (!tile) continue;
-      ammo.push({ x: tile.x + 0.5, y: tile.y + 0.5 });
-    }
+    const numEnemies = clamp(12 + Math.floor(stage * 2), 12, 25);
+    const enemies: Vec2[] = placeItemsInRooms(map, rooms, excludeSpawnExit, numEnemies, rng, used);
 
-    const numHealth = 1 + Math.floor(stage / 3);
-    const health: Vec2[] = [];
-    for (let i = 0; i < numHealth; i++) {
-      const room = rooms[Math.floor(rng() * rooms.length)];
-      const tile = randomFloorInRoom(room, rng, used);
-      if (!tile) continue;
-      health.push({ x: tile.x + 0.5, y: tile.y + 0.5 });
-    }
+    const numAmmo = clamp(6 + Math.floor(stage * 1.0), 6, 12);
+    const ammo: Vec2[] = placeItemsInRooms(map, rooms, excludeSpawnExit, numAmmo, rng, used);
 
-    // --- Decor ---
-    const numDecor = 4 + Math.floor(stage / 2);
-    for (let i = 0; i < numDecor; i++) {
-      const room = rooms[Math.floor(rng() * rooms.length)];
-      const tile = randomFloorInRoom(room, rng, used);
-      if (!tile) continue;
-      const type = DECOR_TYPES[Math.floor(rng() * DECOR_TYPES.length)];
-      decor.push({ x: tile.x + 0.5, y: tile.y + 0.5, type });
-    }
+    const numHealth = clamp(4 + Math.floor(stage * 0.8), 4, 8);
+    const health: Vec2[] = placeItemsInRooms(map, rooms, excludeSpawnExit, numHealth, rng, used);
 
-    // --- Shotgun pickups (stage 2+) ---
-    const numShotguns = stage >= 2 ? 1 + Math.floor((stage - 2) / 2) : 0;
-    const shotguns: Vec2[] = [];
-    for (let i = 0; i < numShotguns; i++) {
-      const room = rooms[Math.floor(rng() * rooms.length)];
-      const tile = randomFloorInRoom(room, rng, used);
-      if (!tile) continue;
-      shotguns.push({ x: tile.x + 0.5, y: tile.y + 0.5 });
-    }
+    const numDecor = clamp(10 + Math.floor(stage * 2), 10, 20);
+    const moreDecor = placeDecorInRooms(map, rooms, excludeSpawnExit, numDecor, rng, used);
+    decor.push(...moreDecor);
 
-    // --- Rocket Launcher pickups (stage 4+) ---
-    const numRocketLaunchers = stage >= 4 ? Math.floor((stage - 4) / 3) + 1 : 0;
-    const rocketLaunchers: Vec2[] = [];
-    for (let i = 0; i < numRocketLaunchers; i++) {
-      const room = rooms[Math.floor(rng() * rooms.length)];
-      const tile = randomFloorInRoom(room, rng, used);
-      if (!tile) continue;
-      rocketLaunchers.push({ x: tile.x + 0.5, y: tile.y + 0.5 });
+    const numShotguns = stage >= 2 ? 2 + Math.floor((stage - 2) / 2) : 0;
+    const shotguns: Vec2[] = placeItemsInRooms(map, rooms, excludeSpawnExit, numShotguns, rng, used);
+
+    const numRocketLaunchers = stage >= 4 ? 1 + Math.floor((stage - 4) / 2) : 0;
+    const rocketLaunchers: Vec2[] = placeItemsInRooms(map, rooms, excludeSpawnExit, numRocketLaunchers, rng, used);
+
+    // Validation
+    if (!validateLevel(map, spawn, rooms, spawnRoomIndices, exitRoomIndices,
+      exits, exitAccessCells, yellowKeycardTile, blueKeycardTile, numSpawnRooms, numExitRooms)) {
+      continue;
     }
 
     const facing = spawnFacing(spawnRoom, spawn);
 
+    // Step 3k: return with all new fields
     return {
       stage,
       seed,
@@ -657,9 +874,14 @@ export function generateLevel(seed: number, stage: number): Level {
       height: H,
       map,
       spawn: { x: spawn.x + 0.5, y: spawn.y + 0.5, dirX: facing.dirX, dirY: facing.dirY },
-      entrance: { x: entrance.x + 0.5, y: entrance.y + 0.5 },
-      exit: { x: exitDoor.wall.x + 0.5, y: exitDoor.wall.y + 0.5 },
-      keycard: { x: keycardTile.x + 0.5, y: keycardTile.y + 0.5 },
+      entrance,
+      spawnRooms: spawnRoomIndices,
+      exits,
+      exitRooms: exitRoomIndices,
+      exit: exits[0],
+      yellowKeycard: { x: yellowKeycardTile.x + 0.5, y: yellowKeycardTile.y + 0.5 },
+      blueKeycard: { x: blueKeycardTile.x + 0.5, y: blueKeycardTile.y + 0.5 },
+      keycard: { x: blueKeycardTile.x + 0.5, y: blueKeycardTile.y + 0.5 },
       enemies,
       ammo,
       health,
@@ -667,8 +889,66 @@ export function generateLevel(seed: number, stage: number): Level {
       decor,
       shotguns,
       rocketLaunchers,
+      rooms: rooms.map(r => ({ x: r.x, y: r.y, w: r.w, h: r.h })),
     };
   }
 
   throw new Error(`level-gen: failed to produce a valid level for stage ${stage} after ${MAX_ATTEMPTS} attempts`);
+}
+
+function validateLevel(
+  map: number[][],
+  spawn: Vec2,
+  rooms: Room[],
+  spawnRoomIndices: number[],
+  exitRoomIndices: number[],
+  exits: Vec2[],
+  exitAccessCells: Vec2[],
+  yellowKeycardTile: Vec2,
+  blueKeycardTile: Vec2,
+  minSpawnRooms: number,
+  minExitRooms: number
+): boolean {
+  // Must have at least the required spawn and exit rooms
+  if (spawnRoomIndices.length < minSpawnRooms) return false;
+  if (exitRoomIndices.length < minExitRooms) return false;
+  if (exits.length < 2) return false;
+
+  // Yellow keycard must be reachable without any key doors
+  const reachableNoKeys = bfsReachable(map, spawn, new Set());
+  if (!isReachable(reachableNoKeys, yellowKeycardTile)) return false;
+
+  // Blue keycard must NOT be reachable without yellow door
+  if (isReachable(reachableNoKeys, blueKeycardTile)) return false;
+
+  // Blue keycard must BE reachable with yellow door
+  const reachableWithYellow = bfsReachable(map, spawn, new Set([TILE.YELLOW_KEY_DOOR]));
+  if (!isReachable(reachableWithYellow, blueKeycardTile)) return false;
+
+  // Exit access cells must NOT be reachable with only yellow door
+  for (const ea of exitAccessCells) {
+    if (isReachable(reachableWithYellow, ea)) return false;
+  }
+
+  // All exit access cells must be reachable with both doors
+  const reachableWithBoth = bfsReachable(map, spawn, new Set([TILE.YELLOW_KEY_DOOR, TILE.BLUE_KEY_DOOR]));
+  for (const ea of exitAccessCells) {
+    if (!isReachable(reachableWithBoth, ea)) return false;
+  }
+
+  // Both doors must be present in the map
+  let hasYellow = false, hasBlue = false;
+  for (let y = 0; y < map.length; y++) {
+    for (let x = 0; x < map[0].length; x++) {
+      if (map[y][x] === TILE.YELLOW_KEY_DOOR) hasYellow = true;
+      if (map[y][x] === TILE.BLUE_KEY_DOOR) hasBlue = true;
+    }
+  }
+  if (!hasYellow || !hasBlue) return false;
+
+  // All positions must be on FLOOR tiles
+  if (map[yellowKeycardTile.y][yellowKeycardTile.x] !== TILE.FLOOR) return false;
+  if (map[blueKeycardTile.y][blueKeycardTile.x] !== TILE.FLOOR) return false;
+
+  return true;
 }

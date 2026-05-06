@@ -49,7 +49,8 @@ export class Renderer {
   private isSprinting: boolean = false;
 
   // Keycard state
-  private hasKeycard: boolean = false;
+  private hasYellowKeycard: boolean = false;
+  private hasBlueKeycard: boolean = false;
   private keycardPickupMessage: number = 0;  // timer for pickup message
   private readonly keycardMessageDuration: number = 2.0;
 
@@ -437,7 +438,11 @@ export class Renderer {
         } else if (sprite.type === SpriteType.HEALTH) {
           this.player.health = Math.min(this.player.maxHealth, this.player.health + 25);
         } else if (sprite.type === SpriteType.KEYCARD) {
-          this.hasKeycard = true;
+          this.hasBlueKeycard = true;
+          this.keycardPickupMessage = this.keycardMessageDuration;
+          this.player.score += 50;
+        } else if (sprite.type === SpriteType.YELLOW_KEYCARD) {
+          this.hasYellowKeycard = true;
           this.keycardPickupMessage = this.keycardMessageDuration;
           this.player.score += 50;
         } else if (sprite.type === SpriteType.WEAPON_SHOTGUN) {
@@ -471,6 +476,7 @@ export class Renderer {
     const ammoTextures = flat.get(SpriteType.AMMO);
     const healthTextures = flat.get(SpriteType.HEALTH);
     const keycardTextures = flat.get(SpriteType.KEYCARD);
+    const yellowKeycardTextures = flat.get(SpriteType.YELLOW_KEYCARD);
     const decorTextures: Partial<Record<SpriteType, Texture[] | undefined>> = {
       [SpriteType.BARREL]: flat.get(SpriteType.BARREL),
       [SpriteType.TERMINAL]: flat.get(SpriteType.TERMINAL),
@@ -507,9 +513,17 @@ export class Renderer {
       this.sprites.push(h);
     }
 
-    // Keycard
+    // Yellow keycard
     {
-      const k = new Sprite(level.keycard.x, level.keycard.y, SpriteType.KEYCARD, keycardTextures?.[0] ?? null);
+      const k = new Sprite(level.yellowKeycard.x, level.yellowKeycard.y, SpriteType.YELLOW_KEYCARD, yellowKeycardTextures?.[0] ?? null);
+      if (yellowKeycardTextures) k.textures = yellowKeycardTextures;
+      k.animationSpeed = 0.12;
+      this.sprites.push(k);
+    }
+
+    // Blue keycard
+    {
+      const k = new Sprite(level.blueKeycard.x, level.blueKeycard.y, SpriteType.KEYCARD, keycardTextures?.[0] ?? null);
       if (keycardTextures) k.textures = keycardTextures;
       k.animationSpeed = 0.12;
       this.sprites.push(k);
@@ -580,7 +594,8 @@ export class Renderer {
     this.player.planeX = -level.spawn.dirY * 0.66;
     this.player.planeY = level.spawn.dirX * 0.66;
 
-    this.hasKeycard = false;
+    this.hasYellowKeycard = false;
+    this.hasBlueKeycard = false;
     this.keycardPickupMessage = 0;
     this.doorMessage = '';
     this.doorMessageTimer = 0;
@@ -1005,7 +1020,7 @@ export class Renderer {
           (mapX + 0.5 - this.player.x) ** 2 + (mapY + 0.5 - this.player.y) ** 2
         );
         if (dist <= 1.5 && worldState.isDoorTile(mapX, mapY)) {
-          const result = worldState.interactAt(mapX, mapY, this.hasKeycard);
+          const result = worldState.interactAt(mapX, mapY, this.hasYellowKeycard, this.hasBlueKeycard);
           this.showDoorMessage(result);
           return;
         }
@@ -1026,10 +1041,15 @@ export class Renderer {
         this.soundManager.play(SoundType.DOOR);
         break;
       case InteractionResult.DOOR_LOCKED:
-        this.doorMessage = 'LOCKED: KEYCARD REQUIRED';
-        this.doorMessageTimer = this.doorMessageDuration;
-        this.soundManager.play(SoundType.DOOR);
-        break;
+          this.doorMessage = 'LOCKED: BLUE KEYCARD REQUIRED';
+          this.doorMessageTimer = this.doorMessageDuration;
+          this.soundManager.play(SoundType.DOOR);
+          break;
+      case InteractionResult.YELLOW_DOOR_LOCKED:
+          this.doorMessage = 'LOCKED: YELLOW KEYCARD REQUIRED';
+          this.doorMessageTimer = this.doorMessageDuration;
+          this.soundManager.play(SoundType.DOOR);
+          break;
       case InteractionResult.SECRET_FOUND:
         this.doorMessage = 'SECRET FOUND!';
         this.doorMessageTimer = this.doorMessageDuration;
@@ -1815,7 +1835,7 @@ export class Renderer {
     }
 
     // --- Keycard Indicator (oben links) ---
-    if (this.hasKeycard) {
+    if (this.hasYellowKeycard) {
       ctx.textAlign = 'left';
       ctx.font = 'bold 14px monospace';
       ctx.fillStyle = '#5af';
@@ -1846,7 +1866,7 @@ export class Renderer {
     if (exitDist < 1.5) {
       ctx.textAlign = 'center';
       ctx.font = 'bold 20px monospace';
-      if (this.hasKeycard) {
+      if (this.hasYellowKeycard && this.hasBlueKeycard) {
         ctx.fillStyle = '#0f0';
         ctx.shadowColor = '#0f0';
         ctx.shadowBlur = 8;
@@ -1982,7 +2002,8 @@ export class Renderer {
 
     this.weapon.reset();
     this.damageFlashTimer = 0;
-    this.hasKeycard = false;
+    this.hasYellowKeycard = false;
+    this.hasBlueKeycard = false;
     this.keycardPickupMessage = 0;
 
     this.sprites = [];
@@ -2251,7 +2272,7 @@ export class Renderer {
         worldState.updateWorld(deltaTime);
 
         // Exit-Door: Spieler mit Keycard an der Exit-Tür → nächste Stage.
-        if (this.hasKeycard && this.input.isKey('KeyE') && !this.wasExitEPressed) {
+        if (this.hasYellowKeycard && this.hasBlueKeycard && this.input.isKey('KeyE') && !this.wasExitEPressed) {
           const exitDx = this.currentLevel.exit.x - this.player.x;
           const exitDy = this.currentLevel.exit.y - this.player.y;
           const exitDistSq = exitDx * exitDx + exitDy * exitDy;
