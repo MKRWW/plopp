@@ -607,11 +607,77 @@ export class TextureManager {
     ctx.fillStyle = '#1a1a1a';
     ctx.fillRect(TEXTURE_SIZE / 2 - 1, 0, mortarW, TEXTURE_SIZE);
 
-    // Subtile "geheime" Markierung: kaum sichtbare Kreise
-    ctx.fillStyle = 'rgba(40, 60, 40, 0.08)';
+    // Prominente diagonale Risslinie von oben-links nach unten-rechts
+    const mainCrack = [];
+    let cx = 15;
+    let cy = 8;
+    mainCrack.push({x: cx, y: cy});
+    for (let step = 0; step < 40; step++) {
+      cx += 2 + Math.random() * 2;
+      cy += 2 + Math.random() * 2;
+      if (Math.random() < 0.3) {
+        cx += (Math.random() - 0.5) * 6;
+        cy += (Math.random() - 0.5) * 6;
+      }
+      mainCrack.push({x: cx, y: cy});
+    }
+
+    // Helle Kante an einer Seite des Risses (Tiefeneffekt)
+    ctx.strokeStyle = 'rgba(100, 95, 90, 0.5)';
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.arc(TEXTURE_SIZE / 2, TEXTURE_SIZE / 2, 20, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.moveTo(mainCrack[0].x - 2, mainCrack[0].y - 2);
+    for (let h = 1; h < mainCrack.length; h++) {
+      ctx.lineTo(mainCrack[h].x - 2, mainCrack[h].y - 2);
+    }
+    ctx.stroke();
+
+    // Dunkler Hauptriss (2-3px)
+    ctx.strokeStyle = '#0a0a0a';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(mainCrack[0].x, mainCrack[0].y);
+    for (let m = 1; m < mainCrack.length; m++) {
+      ctx.lineTo(mainCrack[m].x, mainCrack[m].y);
+    }
+    ctx.stroke();
+
+    // Dunkle Kante an der anderen Seite
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(mainCrack[0].x + 2, mainCrack[0].y + 2);
+    for (let d = 1; d < mainCrack.length; d++) {
+      ctx.lineTo(mainCrack[d].x + 2, mainCrack[d].y + 2);
+    }
+    ctx.stroke();
+
+    // Seitliche Ast-Risse
+    for (let b = 2; b < mainCrack.length - 2; b += 3 + Math.floor(Math.random() * 4)) {
+      let px = mainCrack[b].x;
+      let py = mainCrack[b].y;
+      const dir = Math.random() > 0.5 ? 1 : -1;
+      ctx.strokeStyle = '#0a0a0a';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      for (let bl = 0; bl < 3 + Math.floor(Math.random() * 4); bl++) {
+        px += dir * (1 + Math.random() * 3);
+        py += (Math.random() - 0.3) * 4;
+        ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+
+    // Krater-Partikel (zerkrümelnde Steinteilchen um den Riss)
+    for (let p = 0; p < 30; p++) {
+      const si = Math.floor(Math.random() * mainCrack.length);
+      const speckX = mainCrack[si].x + (Math.random() - 0.5) * 16;
+      const speckY = mainCrack[si].y + (Math.random() - 0.5) * 16;
+      const speckS = 1 + Math.floor(Math.random() * 3);
+      ctx.fillStyle = Math.random() > 0.4 ? '#0a0a0a' : '#1a1a1a';
+      ctx.fillRect(speckX, speckY, speckS, speckS);
+    }
 
     // Rauschen
     const imageData = ctx.getImageData(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
