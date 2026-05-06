@@ -23,6 +23,7 @@ export class GameStateManager {
   public isLoading: boolean = false;
   public pendingLevel: number = 0;
   public loadingProgress: number = 0;
+  private pointerlockListener: () => void;
 
   constructor(initialState: GameState = GameState.MENU) {
     this.state = initialState;
@@ -43,6 +44,13 @@ export class GameStateManager {
         this.transitionTo(GameState.PLAYING);
       }
     });
+    // Pointer lock regained while PAUSED → resume to PLAYING
+    this.pointerlockListener = () => {
+      if (this.state === GameState.PAUSED && document.pointerLockElement) {
+        this.transitionTo(GameState.PLAYING);
+      }
+    };
+    document.addEventListener('pointerlockchange', this.pointerlockListener);
   }
 
   public getState(): GameState {
@@ -57,6 +65,7 @@ export class GameStateManager {
     this.isLoading = false;
     this.pendingLevel = 0;
     this.loadingProgress = 0;
+    document.removeEventListener('pointerlockchange', this.pointerlockListener);
   }
 
  /**

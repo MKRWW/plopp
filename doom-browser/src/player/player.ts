@@ -14,11 +14,9 @@ export class Player {
   /** Kollisionsradius des Spielers in Tile-Einheiten */
   private readonly radius: number = PLAYER_RADIUS;
 
-  // --- Phase 5: Gesundheit & Munition (verwaltet über Weapon-Klasse) ---
+  // --- Phase 5: Gesundheit & Score (Munition verwaltet über WeaponInventory) ---
   public health: number = 100;
   public maxHealth: number = 100;
-  public ammo: number = 50;
-  public maxAmmo: number = 200;
   public score: number = 0;
 
   constructor(startX: number, startY: number) {

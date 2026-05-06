@@ -20,6 +20,13 @@ export class InputHandler {
   // Canvas-Referenz für Pointer Lock
   private canvas: HTMLCanvasElement;
 
+  // Edge-Detection for TAB (weapon switching)
+  private tabPressedOnce = false;
+
+  // Wheel counters (weapon switching), capped at 1
+  private wheelDownFlag = 0;
+  private wheelUpFlag = 0;
+
   constructor(canvas: HTMLCanvasElement, sensitivity: number = 0.002) {
     this.canvas = canvas;
     this.mouseSensitivity = sensitivity;
@@ -27,6 +34,7 @@ export class InputHandler {
     this.setupKeyboard();
     this.setupMouse();
     this.setupPointerLock();
+    this.setupWheel();
   }
 
   /**
@@ -37,8 +45,11 @@ export class InputHandler {
     const self = this;
     window.addEventListener('keydown', (e: KeyboardEvent) => {
       // Verhindere Standardverhalten für Spieltasten (Scrollen etc.)
-      if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'KeyQ', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+      if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'KeyQ', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) {
         e.preventDefault();
+      }
+      if (e.code === 'Tab') {
+        self.tabPressedOnce = true;
       }
       self.keysPressed.add(e.code);
     }, true); // capture = true
@@ -46,6 +57,57 @@ export class InputHandler {
     window.addEventListener('keyup', (e: KeyboardEvent) => {
       self.keysPressed.delete(e.code);
     }, true); // capture = true
+  }
+
+  /**
+   * Wheel-Event-Listener für Weapon-Switching.
+   */
+  private setupWheel(): void {
+    this.canvas.addEventListener('wheel', (e: WheelEvent) => {
+      if (!this.isPointerLocked) return;
+      e.preventDefault();
+      if (e.deltaY > 0) {
+        this.wheelDownFlag = Math.min(this.wheelDownFlag + 1, 1);
+      } else if (e.deltaY < 0) {
+        this.wheelUpFlag = Math.min(this.wheelUpFlag + 1, 1);
+      }
+    }, { passive: false, capture: true });
+  }
+
+  /**
+   * True on the frame TAB was pressed (edge-detected, consumed by caller).
+   */
+  public getTabPressed(): boolean {
+    return this.tabPressedOnce;
+  }
+
+  /**
+   * Consume/clear the tab-pressed edge flag.
+   */
+  public resetTabFlag(): void {
+    this.tabPressedOnce = false;
+  }
+
+  /**
+   * True if a wheel-down event occurred since last reset.
+   */
+  public getWheelDown(): boolean {
+    return this.wheelDownFlag > 0;
+  }
+
+  /**
+   * True if a wheel-up event occurred since last reset.
+   */
+  public getWheelUp(): boolean {
+    return this.wheelUpFlag > 0;
+  }
+
+  /**
+   * Reset both wheel flags.
+   */
+  public resetWheelFlags(): void {
+    this.wheelDownFlag = 0;
+    this.wheelUpFlag = 0;
   }
 
   /**

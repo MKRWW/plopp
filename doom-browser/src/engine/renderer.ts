@@ -7,8 +7,11 @@ import { Sprite, SpriteType, generateSpriteTextures } from './sprite';
 import { corpseTexture } from './sprite-textures';
 import { GameState, GameStateManager } from '../game/state';
 import { Weapon, WeaponState } from '../game/weapon';
+import { WeaponInventory, WeaponType, WEAPONS } from '../game/weapons';
+import { RocketProjectile } from './rocket-projectile';
 import { slideAlongX, slideAlongY, PLAYER_RADIUS, ENEMY_RADIUS, MIN_ENTITY_DIST,
-         resolveAllEntityOverlaps, wouldOverlapEntity, resolveEntityCollision } from './collision';
+          resolveAllEntityOverlaps, wouldOverlapEntity, resolveEntityCollision,
+          ROCKET_RADIUS, positionCollides } from './collision';
 import { Minimap } from '../game/minimap';
 import { SoundManager, SoundType } from '../audio/sound';
 import { Level, generateLevel } from './level-gen';
@@ -37,6 +40,7 @@ export class Renderer {
   private sprites: Sprite[] = [];
   private gameStateManager: GameStateManager;
   private weapon: Weapon;
+  private inventory: WeaponInventory;
 
   // Delta-Time tracking
   private lastTime: number = 0;
@@ -87,10 +91,23 @@ export class Renderer {
   private stepTimer: number = 0;       // Timer für Schritt-Sounds
   private readonly stepInterval: number = 0.35; // Schritt alle 350ms beim Laufen
 
+  private wasPointerLockedLastFrame: boolean = false;
+
+  // Rocket projectiles
+  private rockets: RocketProjectile[] = [];
+
   // Edge-Triggering für Interaktion (E-Taste)
   private wasInteractPressedLastFrame: boolean = false;
   // Separates Edge-Tracking für Exit-Door-E (verhindert Mehrfach-Trigger pro Druck)
   private wasExitEPressed: boolean = false;
+
+  // Edge-Detection for TAB (reset after each poll)
+  private wasTabLastFrame: boolean = false;
+
+  // Weapon flash feedback
+  private weaponFlashTimer: number = 0;
+  private weaponFlashName: string = '';
+  private readonly WEAPON_FLASH_DURATION: number = 1.5;
 
   // Procedural Levels: aktuelles Level + Stage-Counter + Basis-Seed.
   // Das Level wird beim Stage-Wechsel mit (baseSeed, stage) neu generiert,
@@ -115,12 +132,14 @@ export class Renderer {
     player: Player,
     gameStateManager: GameStateManager,
     weapon: Weapon,
+    inventory: WeaponInventory,
     level: Level,
     baseSeed: number
   ) {
     this.player = player;
     this.gameStateManager = gameStateManager;
     this.weapon = weapon;
+    this.inventory = inventory;
     this.currentLevel = level;
     this.stage = level.stage;
     this.baseSeed = baseSeed;
@@ -218,38 +237,57 @@ export class Renderer {
    * Handelt einen Schuss: feuert Waffe, prüft Hit auf Gegner-Sprites.
    */
   private handleShoot(): void {
-    if (!this.weapon.fire()) return;
+    if (!this.inventory.fire()) return;
 
-    // Sound: Schuss
-    this.soundManager.play(SoundType.SHOOT);
+    const def = this.inventory.getCurrent();
+
+    // Set per-weapon animation state on Weapon
+    this.weapon.triggerFire(
+      def.flashDuration,
+      def.recoilY,
+      def.recoilXSpread
+    );
+
+    // Fire sound per weapon
+    if (def.type === WeaponType.ROCKET_LAUNCHER) {
+      this.soundManager.play(SoundType.ROCKET_SHOOT);
+    } else {
+      this.soundManager.play(SoundType.SHOOT);
+    }
 
     // Screen Shake: kurz leicht wackeln beim Schuss
     this.screenShakeTimer = 0.08;
-    this.screenShakeIntensity = 3;
+    this.screenShakeIntensity = def.screenShake;
 
-    // Raycast in Blickrichtung → prüfe ob ein Gegner-Sprite getroffen wird
+    if (def.isProjectile) {
+      // Rocket: spawn projectile
+      const rocketSpeed = def.projectileSpeed || 12;
+      const rocket = new RocketProjectile(
+        this.player.x, this.player.y, 0.3,
+        this.player.dirX, this.player.dirY,
+        rocketSpeed, 4,
+        def.explosionRadius ?? 1.5,
+        def.explosionDamage ?? 10
+      );
+      this.rockets.push(rocket);
+      return;
+    }
+
+    // Hitscan weapons: raycast in player direction
     const hit = this.checkShotHit();
     if (hit) {
-      // Schaden an Gegner (1 HP pro Schuss)
-      hit.health--;
+      hit.health -= def.damage;
 
-      // Hit-Feedback: kurz aufblitzen
       hit.hitFlashTimer = 0.12;
 
-      // Screen Shake: stärker beim Treffer
       this.screenShakeTimer = 0.12;
-      this.screenShakeIntensity = 5;
+      this.screenShakeIntensity = def.screenShake + 2;
 
-      // Hitmarker in Bildschirmmitte
       this.hitMarkerTimer = this.hitMarkerDuration;
 
-      // Sound: Treffer
       this.soundManager.play(SoundType.HIT);
 
-      // Wenn Gegner tot → Death-Animation starten
       if (hit.health <= 0) {
-        // Letzte angle-aware Textur einfrieren, damit die Death-Animation
-        // den zuletzt gesehenen Blickwinkel behält statt auf "front" zurückzuspringen.
         if (hit.angleViews.length > 0) {
           const px = this.player.x;
           const py = this.player.y;
@@ -265,14 +303,12 @@ export class Renderer {
         hit.isAlive = false;
         hit.isDying = true;
         hit.deathTimer = hit.deathDuration;
-        this.weapon.killCount++;
+        this.inventory.kills++;
         this.player.score += 100;
 
-        // Sound: Gegner-Tod
         this.soundManager.play(SoundType.ENEMY_DEATH);
       }
     } else {
-      // Kein Gegner getroffen → Wand-Einschlag (wall impact spark)
       this.triggerWallImpact();
     }
   }
@@ -396,15 +432,18 @@ export class Renderer {
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       if (dist < pickupRadius) {
-        // Item einsammeln
         if (sprite.type === SpriteType.AMMO) {
-          this.weapon.addAmmo(20);
+          this.inventory.addAmmo(20);
         } else if (sprite.type === SpriteType.HEALTH) {
-          this.weapon.addHealth(25);
+          this.player.health = Math.min(this.player.maxHealth, this.player.health + 25);
         } else if (sprite.type === SpriteType.KEYCARD) {
           this.hasKeycard = true;
           this.keycardPickupMessage = this.keycardMessageDuration;
           this.player.score += 50;
+        } else if (sprite.type === SpriteType.WEAPON_SHOTGUN) {
+          this.inventory.addWeapon(WEAPONS[1]);
+        } else if (sprite.type === SpriteType.WEAPON_ROCKETLAUNCHER) {
+          this.inventory.addWeapon(WEAPONS[2]);
         }
         this.soundManager.play(SoundType.PICKUP);
         this.sprites.splice(i, 1);
@@ -490,6 +529,24 @@ export class Renderer {
       const sprite = new Sprite(d.x, d.y, d.type, tex?.[0] ?? null);
       if (tex) sprite.textures = tex;
       this.sprites.push(sprite);
+    }
+
+    // Shotgun pickups
+    const shotgunTextures = flat.get(SpriteType.WEAPON_SHOTGUN);
+    for (const pos of level.shotguns) {
+      const s = new Sprite(pos.x, pos.y, SpriteType.WEAPON_SHOTGUN, shotgunTextures?.[0] ?? null);
+      if (shotgunTextures) s.textures = shotgunTextures;
+      s.animationSpeed = 0.12;
+      this.sprites.push(s);
+    }
+
+    // Rocket Launcher pickups
+    const rocketTextures = flat.get(SpriteType.WEAPON_ROCKETLAUNCHER);
+    for (const pos of level.rocketLaunchers) {
+      const s = new Sprite(pos.x, pos.y, SpriteType.WEAPON_ROCKETLAUNCHER, rocketTextures?.[0] ?? null);
+      if (rocketTextures) s.textures = rocketTextures;
+      s.animationSpeed = 0.12;
+      this.sprites.push(s);
     }
   }
 
@@ -789,8 +846,11 @@ export class Renderer {
 
     // Overlay-Click → Pointer Lock wiederherstellen
     this.pauseOverlay.addEventListener('click', () => {
-      this.input.requestPointerLock();
+      if (this.gameStateManager.getState() === GameState.PAUSED) {
+        this.gameStateManager.transitionTo(GameState.PLAYING);
+      }
       this.pauseOverlay.style.display = 'none';
+      this.input.requestPointerLock();
     });
   }
 
@@ -800,6 +860,9 @@ export class Renderer {
   private setupCanvasClick(): void {
     this.canvas.addEventListener('click', () => {
       if (!this.input.getPointerLocked()) {
+        if (this.gameStateManager.getState() === GameState.PAUSED) {
+          this.gameStateManager.transitionTo(GameState.PLAYING);
+        }
         this.input.requestPointerLock();
         this.pauseOverlay.style.display = 'none';
       }
@@ -1314,19 +1377,32 @@ export class Renderer {
    * Highlights/Schatten, Pixel-Art-Optik.
    */
   private drawWeapon(): void {
+    const def = this.inventory.getCurrent();
     const bobY = this.weapon.getBobOffset();
     const bobX = this.weapon.getBobXOffset();
     const recoilY = this.weapon.getRecoilY();
     const recoilX = this.weapon.getRecoilX();
 
-    // Basis-Position: unten mittig
     const cx = SCREEN_WIDTH / 2 + bobX + recoilX;
     const baseY = SCREEN_HEIGHT + bobY + recoilY;
 
+    if (def.type === WeaponType.PISTOL) {
+      this.drawPistol(cx, baseY);
+    } else if (def.type === WeaponType.SHOTGUN) {
+      this.drawShotgun(cx, baseY);
+    } else if (def.type === WeaponType.ROCKET_LAUNCHER) {
+      this.drawRocketLauncher(cx, baseY);
+    }
+
+    // Muzzle Flash (dispatched per weapon type)
+    if (this.weapon.state === WeaponState.FIRING && this.muzzleFlashTexture) {
+      this.drawMuzzleFlash(cx, baseY, def);
+    }
+  }
+
+  private drawPistol(cx: number, baseY: number): void {
     const ctx = this.ctx;
 
-    // ── Griff (Handle) ──
-    // Linke Griffschale (braun)
     ctx.fillStyle = '#5c3a1e';
     ctx.beginPath();
     ctx.moveTo(cx - 28, baseY - 100);
@@ -1336,7 +1412,6 @@ export class Renderer {
     ctx.closePath();
     ctx.fill();
 
-    // Rechte Griffschale
     ctx.fillStyle = '#6b4422';
     ctx.beginPath();
     ctx.moveTo(cx + 10, baseY - 100);
@@ -1346,7 +1421,6 @@ export class Renderer {
     ctx.closePath();
     ctx.fill();
 
-    // Griff-Griffel-Textur (beide Seiten)
     ctx.fillStyle = '#4a2a10';
     for (let i = 0; i < 7; i++) {
       const ly = baseY - 92 + i * 11;
@@ -1354,137 +1428,296 @@ export class Renderer {
       ctx.fillRect(cx + 10, ly, 16, 2);
     }
 
-    // Griff-Highlight (linke Kante)
     ctx.fillStyle = 'rgba(255,220,180,0.12)';
     ctx.fillRect(cx - 27, baseY - 95, 2, 75);
-
-    // Griff-Schatten (rechte Kante)
     ctx.fillStyle = 'rgba(0,0,0,0.25)';
     ctx.fillRect(cx + 27, baseY - 95, 2, 75);
 
-    // ── Frame / Unterseite des Slides (dunkles Metall) ──
     ctx.fillStyle = '#3a3a3a';
     ctx.fillRect(cx - 34, baseY - 130, 68, 34);
-
-    // Frame-Highlight (oben)
     ctx.fillStyle = 'rgba(255,255,255,0.1)';
     ctx.fillRect(cx - 33, baseY - 129, 66, 2);
-
-    // Frame-Schatten (unten)
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
     ctx.fillRect(cx - 33, baseY - 99, 66, 2);
 
-    // ── Trigger-Vertiefung ──
     ctx.fillStyle = '#1a1a1a';
     ctx.fillRect(cx - 5, baseY - 100, 10, 14);
-    // Trigger (hell)
     ctx.fillStyle = '#888';
     ctx.fillRect(cx - 2, baseY - 96, 4, 8);
 
-    // ── Slide (oben, dunkles Metall) ──
     ctx.fillStyle = '#4a4a4a';
     ctx.fillRect(cx - 36, baseY - 155, 72, 28);
-
-    // Slide-Highlight (oben links)
     ctx.fillStyle = 'rgba(255,255,255,0.12)';
     ctx.fillRect(cx - 35, baseY - 154, 30, 2);
-
-    // Slide-Schatten (unten)
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     ctx.fillRect(cx - 35, baseY - 129, 70, 2);
 
-    // Slide-Griffel (feine Linien)
     ctx.fillStyle = '#3a3a3a';
     for (let i = 0; i < 5; i++) {
       ctx.fillRect(cx - 28 + i * 10, baseY - 148, 6, 2);
     }
 
-    // ── Lauf (Barrel) ──
-    // Hauptläufer
     ctx.fillStyle = '#555';
     ctx.fillRect(cx - 14, baseY - 185, 28, 32);
-
-    // Lauf-Innen (dunkel)
     ctx.fillStyle = '#1a1a1a';
     ctx.fillRect(cx - 8, baseY - 183, 16, 28);
-
-    // Lauf-Highlight (links)
     ctx.fillStyle = 'rgba(255,255,255,0.15)';
     ctx.fillRect(cx - 13, baseY - 184, 3, 28);
-
-    // Lauf-Schatten (rechts)
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
     ctx.fillRect(cx + 10, baseY - 184, 3, 28);
 
-    // Lauf-Mündung (Muzzle Ring)
     ctx.fillStyle = '#666';
     ctx.fillRect(cx - 16, baseY - 186, 32, 4);
     ctx.fillStyle = '#222';
     ctx.fillRect(cx - 10, baseY - 186, 20, 3);
 
-    // ── Front Sight (Vorderer Visierpunkt) ──
     ctx.fillStyle = '#777';
     ctx.fillRect(cx - 2, baseY - 189, 4, 5);
-
-    // ── Rear Sight (Hinterer Visierpunkt) ──
     ctx.fillStyle = '#666';
     ctx.fillRect(cx - 4, baseY - 158, 3, 4);
     ctx.fillRect(cx + 1, baseY - 158, 3, 4);
 
-    // ── Safety / Deko-Details am Frame ──
     ctx.fillStyle = '#777';
     ctx.fillRect(cx - 36, baseY - 120, 4, 6);
+  }
 
-    // ── Muzzle Flash ──
-    if (this.weapon.state === WeaponState.FIRING && this.muzzleFlashTexture) {
-      const flashSize = 120 * this.weapon.flashScale;
-      const flashX = cx - 4 - flashSize / 2 + this.weapon.flashOffsetX;
-      const flashY = baseY - 210 + this.weapon.flashOffsetY;
+  private drawShotgun(cx: number, baseY: number): void {
+    const ctx = this.ctx;
 
-      const texData = this.muzzleFlashTexture.data.data;
-      for (let ty = 0; ty < this.muzzleFlashTexture.height; ty++) {
-        for (let tx = 0; tx < this.muzzleFlashTexture.width; tx++) {
-          const srcIdx = (ty * this.muzzleFlashTexture.width + tx) * 4;
-          const alpha = texData[srcIdx + 3];
-          if (alpha > 0) {
-            const screenX = Math.floor(flashX + (tx / this.muzzleFlashTexture.width) * flashSize);
-            const screenY = Math.floor(flashY + (ty / this.muzzleFlashTexture.height) * flashSize);
-            if (screenX >= 0 && screenX < SCREEN_WIDTH && screenY >= 0 && screenY < SCREEN_HEIGHT) {
-              const r = Math.min(255, texData[srcIdx] * 1.3);
-              const g = Math.min(255, texData[srcIdx + 1] * 1.3);
-              const b = Math.min(255, texData[srcIdx + 2] * 1.1);
-              ctx.fillStyle = `rgba(${r},${g},${b},${alpha / 255})`;
-              const pxSize = Math.ceil(flashSize / this.muzzleFlashTexture.width);
-              ctx.fillRect(screenX, screenY, pxSize, pxSize);
-            }
+    // Stock (wood grain, left)
+    ctx.fillStyle = '#6B4226';
+    ctx.beginPath();
+    ctx.moveTo(cx - 30, baseY - 70);
+    ctx.lineTo(cx - 10, baseY - 70);
+    ctx.lineTo(cx - 6, baseY - 10);
+    ctx.lineTo(cx - 34, baseY - 10);
+    ctx.closePath();
+    ctx.fill();
+
+    // Wood grain
+    ctx.fillStyle = '#5A3520';
+    ctx.fillRect(cx - 28, baseY - 65, 12, 2);
+    ctx.fillRect(cx - 26, baseY - 55, 14, 2);
+    ctx.fillRect(cx - 24, baseY - 45, 12, 2);
+    ctx.fillRect(cx - 22, baseY - 35, 10, 2);
+    ctx.fillRect(cx - 20, baseY - 25, 10, 2);
+
+    ctx.fillStyle = 'rgba(255,220,180,0.10)';
+    ctx.fillRect(cx - 29, baseY - 68, 2, 55);
+
+    // Receiver body
+    ctx.fillStyle = '#4a4a4a';
+    ctx.fillRect(cx - 16, baseY - 95, 36, 30);
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.fillRect(cx - 15, baseY - 94, 34, 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(cx - 15, baseY - 67, 34, 2);
+
+    // Pump
+    ctx.fillStyle = '#555';
+    ctx.fillRect(cx - 10, baseY - 65, 24, 8);
+    ctx.fillStyle = '#666';
+    ctx.fillRect(cx - 8, baseY - 63, 20, 5);
+
+    // Double barrels
+    ctx.fillStyle = '#5a3a1a';
+    ctx.fillRect(cx - 12, baseY - 155, 12, 62);
+    ctx.fillStyle = '#6B4A20';
+    ctx.fillRect(cx - 10, baseY - 153, 8, 58);
+
+    ctx.fillStyle = '#5a3a1a';
+    ctx.fillRect(cx + 2, baseY - 155, 12, 62);
+    ctx.fillStyle = '#6B4A20';
+    ctx.fillRect(cx + 4, baseY - 153, 8, 58);
+
+    // Barrel tips
+    ctx.fillStyle = '#777';
+    ctx.fillRect(cx - 14, baseY - 157, 14, 5);
+    ctx.fillStyle = '#888';
+    ctx.fillRect(cx + 2, baseY - 157, 14, 5);
+
+    // Barrel openings
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(cx - 12, baseY - 156, 10, 3);
+    ctx.fillRect(cx + 4, baseY - 156, 10, 3);
+
+    // Barrel highlights
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.fillRect(cx - 11, baseY - 154, 2, 50);
+    ctx.fillRect(cx + 3, baseY - 154, 2, 50);
+
+    // Trigger guard
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(cx - 2, baseY - 95, 6, 12);
+    ctx.fillStyle = '#888';
+    ctx.fillRect(cx, baseY - 92, 2, 8);
+
+    // Sight
+    ctx.fillStyle = '#666';
+    ctx.fillRect(cx - 2, baseY - 100, 3, 4);
+    ctx.fillRect(cx + 3, baseY - 100, 3, 4);
+  }
+
+  private drawRocketLauncher(cx: number, baseY: number): void {
+    const ctx = this.ctx;
+
+    // Stock (wood, left)
+    ctx.fillStyle = '#5A3520';
+    ctx.beginPath();
+    ctx.moveTo(cx - 34, baseY - 80);
+    ctx.lineTo(cx - 12, baseY - 80);
+    ctx.lineTo(cx - 8, baseY - 10);
+    ctx.lineTo(cx - 38, baseY - 10);
+    ctx.closePath();
+    ctx.fill();
+
+    // Wood grain
+    ctx.fillStyle = '#4a2a15';
+    ctx.fillRect(cx - 32, baseY - 75, 14, 2);
+    ctx.fillRect(cx - 30, baseY - 65, 12, 2);
+    ctx.fillRect(cx - 28, baseY - 55, 10, 2);
+    ctx.fillRect(cx - 26, baseY - 45, 10, 2);
+    ctx.fillRect(cx - 24, baseY - 35, 8, 2);
+
+    // Main tube (large gray cylinder)
+    ctx.fillStyle = '#555';
+    ctx.fillRect(cx - 20, baseY - 160, 60, 36);
+    ctx.fillStyle = '#666';
+    ctx.fillRect(cx - 18, baseY - 158, 56, 12);
+    ctx.fillStyle = '#444';
+    ctx.fillRect(cx - 18, baseY - 132, 56, 12);
+
+    // Tube bands
+    ctx.fillStyle = '#3a3a3a';
+    ctx.fillRect(cx - 20, baseY - 148, 60, 3);
+    ctx.fillRect(cx - 20, baseY - 138, 60, 3);
+
+    // Red warhead tip
+    ctx.fillStyle = '#cc2222';
+    ctx.beginPath();
+    ctx.moveTo(cx + 38, baseY - 160);
+    ctx.lineTo(cx + 58, baseY - 142);
+    ctx.lineTo(cx + 38, baseY - 124);
+    ctx.closePath();
+    ctx.fill();
+
+    // Warhead highlight
+    ctx.fillStyle = '#ee3333';
+    ctx.beginPath();
+    ctx.moveTo(cx + 39, baseY - 156);
+    ctx.lineTo(cx + 52, baseY - 142);
+    ctx.lineTo(cx + 39, baseY - 144);
+    ctx.closePath();
+    ctx.fill();
+
+    // Warhead opening
+    ctx.fillStyle = '#222';
+    ctx.fillRect(cx + 55, baseY - 144, 4, 4);
+
+    // Green fuel tank below
+    ctx.fillStyle = '#228B22';
+    ctx.fillRect(cx - 8, baseY - 118, 28, 16);
+    ctx.fillStyle = '#2EA02E';
+    ctx.fillRect(cx - 6, baseY - 116, 24, 8);
+
+    // Tank stripe
+    ctx.fillStyle = '#1a6b1a';
+    ctx.fillRect(cx + 4, baseY - 118, 4, 16);
+
+    // Sight on top
+    ctx.fillStyle = '#666';
+    ctx.fillRect(cx - 2, baseY - 164, 10, 6);
+    ctx.fillStyle = '#888';
+    ctx.fillRect(cx, baseY - 163, 4, 2);
+
+    // Trigger area
+    ctx.fillStyle = '#3a3a3a';
+    ctx.fillRect(cx - 8, baseY - 100, 20, 16);
+    ctx.fillStyle = '#888';
+    ctx.fillRect(cx - 2, baseY - 98, 4, 10);
+
+    // Trigger guard
+    ctx.strokeStyle = '#444';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(cx + 4, baseY - 88, 6, 0, Math.PI);
+    ctx.stroke();
+  }
+
+  private drawMuzzleFlash(cx: number, baseY: number, def: import('../game/weapons').WeaponDef): void {
+    const ctx = this.ctx;
+    if (!this.muzzleFlashTexture) return;
+
+    // Per-weapon flash size and color variation
+    let flashSize: number;
+    let flashY: number;
+    let rMul: number, gMul: number, bMul: number;
+    let coreSize: number;
+
+    if (def.type === WeaponType.ROCKET_LAUNCHER) {
+      flashSize = 180 * this.weapon.flashScale;
+      flashY = baseY - 178;
+      rMul = 1.5; gMul = 0.9; bMul = 0.4;
+      coreSize = 50 * this.weapon.flashScale;
+    } else if (def.type === WeaponType.SHOTGUN) {
+      flashSize = 100 * this.weapon.flashScale;
+      flashY = baseY - 178;
+      rMul = 1.3; gMul = 1.3; bMul = 0.8;
+      coreSize = 25 * this.weapon.flashScale;
+    } else {
+      flashSize = 120 * this.weapon.flashScale;
+      flashY = baseY - 210;
+      rMul = 1.3; gMul = 1.3; bMul = 1.1;
+      coreSize = 30 * this.weapon.flashScale;
+    }
+
+    const flashX = cx - 4 - flashSize / 2 + this.weapon.flashOffsetX;
+    const offsetY = this.weapon.flashOffsetY;
+
+    const texData = this.muzzleFlashTexture.data.data;
+    for (let ty = 0; ty < this.muzzleFlashTexture.height; ty++) {
+      for (let tx = 0; tx < this.muzzleFlashTexture.width; tx++) {
+        const srcIdx = (ty * this.muzzleFlashTexture.width + tx) * 4;
+        const alpha = texData[srcIdx + 3];
+        if (alpha > 0) {
+          const screenX = Math.floor(flashX + (tx / this.muzzleFlashTexture.width) * flashSize);
+          const screenY = Math.floor(flashY + offsetY + (ty / this.muzzleFlashTexture.height) * flashSize);
+          if (screenX >= 0 && screenX < SCREEN_WIDTH && screenY >= 0 && screenY < SCREEN_HEIGHT) {
+            const r = Math.min(255, texData[srcIdx] * rMul);
+            const g = Math.min(255, texData[srcIdx + 1] * gMul);
+            const b = Math.min(255, texData[srcIdx + 2] * bMul);
+            ctx.fillStyle = `rgba(${r},${g},${b},${alpha / 255})`;
+            const pxSize = Math.ceil(flashSize / this.muzzleFlashTexture.width);
+            ctx.fillRect(screenX, screenY, pxSize, pxSize);
           }
         }
       }
-
-      // Extra: kleiner weißer Kern-Flash für mehr Punch
-      const coreSize = 30 * this.weapon.flashScale;
-      const coreGrad = ctx.createRadialGradient(
-        cx + this.weapon.flashOffsetX,
-        baseY - 200 + this.weapon.flashOffsetY,
-        0,
-        cx + this.weapon.flashOffsetX,
-        baseY - 200 + this.weapon.flashOffsetY,
-        coreSize / 2
-      );
-      coreGrad.addColorStop(0, 'rgba(255,255,255,0.9)');
-      coreGrad.addColorStop(0.5, 'rgba(255,240,150,0.5)');
-      coreGrad.addColorStop(1, 'rgba(255,150,0,0)');
-      ctx.fillStyle = coreGrad;
-      ctx.beginPath();
-      ctx.arc(
-        cx + this.weapon.flashOffsetX,
-        baseY - 200 + this.weapon.flashOffsetY,
-        coreSize / 2,
-        0,
-        Math.PI * 2
-      );
-      ctx.fill();
     }
+
+    // Core flash
+    const coreColor0 = def.type === WeaponType.ROCKET_LAUNCHER ? 'rgba(255,140,40,0.9)' : 'rgba(255,255,255,0.9)';
+    const coreColor1 = def.type === WeaponType.ROCKET_LAUNCHER ? 'rgba(255,80,0,0)' : 'rgba(255,150,0,0)';
+    const coreGrad = ctx.createRadialGradient(
+      cx + this.weapon.flashOffsetX,
+      flashY + offsetY + 20,
+      0,
+      cx + this.weapon.flashOffsetX,
+      flashY + offsetY + 20,
+      coreSize / 2
+    );
+    coreGrad.addColorStop(0, coreColor0);
+    coreGrad.addColorStop(0.5, def.type === WeaponType.ROCKET_LAUNCHER ? 'rgba(255,200,50,0.5)' : 'rgba(255,240,150,0.5)');
+    coreGrad.addColorStop(1, coreColor1);
+    ctx.fillStyle = coreGrad;
+    ctx.beginPath();
+    ctx.arc(
+      cx + this.weapon.flashOffsetX,
+      flashY + offsetY + 20,
+      coreSize / 2,
+      0,
+      Math.PI * 2
+    );
+    ctx.fill();
   }
 
   /**
@@ -1510,7 +1743,7 @@ export class Renderer {
     ctx.fillRect(healthBarX, healthBarY, healthBarW, healthBarH);
 
     // Füllstand
-    const healthPct = this.weapon.health / this.weapon.maxHealth;
+    const healthPct = this.player.health / this.player.maxHealth;
     const healthColor = healthPct > 0.5 ? '#0c0' : (healthPct > 0.25 ? '#cc0' : '#c00');
     ctx.fillStyle = healthColor;
     ctx.fillRect(healthBarX, healthBarY, healthBarW * healthPct, healthBarH);
@@ -1519,13 +1752,14 @@ export class Renderer {
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 14px monospace';
     ctx.textAlign = 'left';
-    ctx.fillText(`HP ${this.weapon.health}`, healthBarX + 5, healthBarY + 15);
+    ctx.fillText(`HP ${this.player.health}`, healthBarX + 5, healthBarY + 15);
 
-    // --- Ammo (unten rechts) ---
+    // --- Weapon Name + Ammo (unten rechts) ---
+    const def = this.inventory.getCurrent();
     ctx.textAlign = 'right';
     ctx.font = 'bold 18px monospace';
     ctx.fillStyle = '#ff0';
-    ctx.fillText(`AMMO: ${this.weapon.ammo}`, w - 20, h - 30);
+    ctx.fillText(`${def.name} — ${this.inventory.getCurrentAmmo()}`, w - 20, h - 30);
 
     // --- Score (oben rechts) ---
     ctx.textAlign = 'right';
@@ -1536,7 +1770,7 @@ export class Renderer {
     // --- Kills (oben rechts, unter Score) ---
     ctx.font = '14px monospace';
     ctx.fillStyle = '#f88';
-    ctx.fillText(`KILLS: ${this.weapon.killCount}`, w - 20, 45);
+    ctx.fillText(`KILLS: ${this.inventory.kills}`, w - 20, 45);
 
     // --- Sprint-Indikator ---
     if (this.isSprinting) {
@@ -1622,6 +1856,19 @@ export class Renderer {
         ctx.fillStyle = '#f44';
         ctx.fillText('KEYCARD REQUIRED', w / 2, h - 90);
       }
+    }
+
+    // --- Weapon Switch Flash (centered) ---
+    if (this.weaponFlashTimer > 0) {
+      const alpha = this.weaponFlashTimer / this.WEAPON_FLASH_DURATION;
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 32px monospace';
+      ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+      ctx.shadowColor = '#fff';
+      ctx.shadowBlur = 10;
+      ctx.fillText(this.weaponFlashName, w / 2, h / 2);
+      ctx.restore();
     }
 
     // --- Stage-Anzeige (oben Mitte, klein) ---
@@ -1749,6 +1996,9 @@ export class Renderer {
     this.isLoading = false;
     this.pendingLevel = null;
     this.loadingProgress = 0;
+
+    this.weaponFlashTimer = 0;
+    this.weaponFlashName = '';
   }
 
   /**
@@ -1788,7 +2038,7 @@ export class Renderer {
 
         if (sprite.attackTimer >= attackCooldown) {
           sprite.attackTimer = 0;
-          this.weapon.takeDamage(attackDamage);
+          this.player.health -= attackDamage;
           this.triggerDamageFlash();
         }
       } else {
@@ -1875,9 +2125,15 @@ export class Renderer {
       }
       previousState = gameState;
 
-      // Update-Logik (nur wenn PLAYING)
+     // ================================================================
+      // UPDATE-PHASE: Alle Spiel-Logik-Updates nur wenn PLAYING.
+      // Rendering-Only-Timer aktualisieren UNABHÄNGIG vom Spielzustand,
+      // damit HUD-Overlays (Schaden, Pause, Hitmarker) visuell flüssig
+      // bleiben und keine visuellen Sprünge beim Resume auftreten.
+      // ================================================================
+
+      // --- Loading screen updates ---
       if (gameState === GameState.LOADING) {
-        // Loading screen animation + pending level check
         if (this.pendingLevel !== null) {
           const elapsed = performance.now() - this.loadingAnimStart;
           this.loadingProgress = Math.min(elapsed / this.LOAD_ANIM_MS, 1.0);
@@ -1890,13 +2146,81 @@ export class Renderer {
         }
       }
 
+      // --- Game-state mutations: NUR im Zustand PLAYING ---
       if (gameState === GameState.PLAYING) {
+        // Pause-Overlay verstecken wenn aus PAUSED zurückgekehrt
+        if (this.pointerLockAvailable) {
+          this.pauseOverlay.style.display = 'none';
+        }
+
         this.updatePlayer(deltaTime);
+
+        // --- Weapon Switching: TAB / Wheel ---
+        // Priority: TAB and wheel-down both cycle forward; wheel-up cycles backward.
+        // TAB and wheel-down are grouped together (same direction), wheel-up is separate.
+        const tabPressed = this.input.getTabPressed();
+        const wheelDown = this.input.getWheelDown();
+        const wheelUp = this.input.getWheelUp();
+        this.input.resetTabFlag();
+        this.input.resetWheelFlags();
+
+        let switched = false;
+        if (tabPressed || wheelDown) {
+          switched = this.inventory.switchNext();
+        } else if (wheelUp) {
+          switched = this.inventory.switchPrev();
+        }
+        if (switched) {
+          this.weaponFlashTimer = this.WEAPON_FLASH_DURATION;
+          this.weaponFlashName = this.inventory.getCurrent().name;
+        }
 
         // Weapon-Animation updaten
         const isMoving = this.input.isForward() || this.input.isBackward() ||
-                         this.input.isStrafeLeft() || this.input.isStrafeRight();
+                           this.input.isStrafeLeft() || this.input.isStrafeRight();
         this.weapon.update(deltaTime, isMoving);
+
+        // Inventory: update fire cooldowns
+        this.inventory.update(deltaTime);
+
+        // Rocket projectiles: update, check expiry/wall collisions, check enemy hits
+        for (let i = this.rockets.length - 1; i >= 0; i--) {
+          const r = this.rockets[i];
+          r.update(deltaTime);
+          if (r.isExpired() || positionCollides(r.x, r.y, ROCKET_RADIUS)) {
+            const result = r.explode(this.sprites.filter(s => s.type === SpriteType.ENEMY));
+            this.screenShakeTimer = 0.2;
+            this.screenShakeIntensity = 12;
+            this.damageFlashTimer = this.damageFlashDuration;
+            this.soundManager.play(SoundType.ROCKET_EXPLOSION);
+            this.rockets.splice(i, 1);
+            for (let k = 0; k < result.killed; k++) {
+              this.inventory.kills++;
+              this.player.score += 100;
+              this.soundManager.play(SoundType.ENEMY_DEATH);
+            }
+            continue;
+          }
+          // Check direct enemy hit
+          for (const sprite of this.sprites) {
+            if (sprite.type === SpriteType.ENEMY && sprite.isAlive && !sprite.isDying && !sprite.isDead) {
+              if (r.checkHit(sprite)) {
+                const result = r.explode(this.sprites.filter(s => s.type === SpriteType.ENEMY));
+                this.screenShakeTimer = 0.2;
+                this.screenShakeIntensity = 12;
+                this.damageFlashTimer = this.damageFlashDuration;
+                this.soundManager.play(SoundType.ROCKET_EXPLOSION);
+                this.rockets.splice(i, 1);
+                for (let k = 0; k < result.killed; k++) {
+                  this.inventory.kills++;
+                  this.player.score += 100;
+                  this.soundManager.play(SoundType.ENEMY_DEATH);
+                }
+                break;
+              }
+            }
+          }
+        }
 
         // Sprite-Animationen updaten + Hit/Death-Timer
         for (const sprite of this.sprites) {
@@ -1908,8 +2232,6 @@ export class Renderer {
           }
 
           // Death-Animation: Timer herunterzählen und in Corpse-Status übergehen.
-          // Mit prozeduralen Stages gibt es kein Auto-WIN bei "alle Gegner tot" mehr —
-          // Fortschritt läuft ausschliesslich über die Exit-Tür.
           if (sprite.isDying) {
             sprite.deathTimer -= deltaTime;
             if (sprite.deathTimer <= 0) {
@@ -1922,50 +2244,13 @@ export class Renderer {
         // Gegner-KI updaten (Chase + Angriff)
         this.updateEnemyAI(deltaTime);
 
-        // Damage-Flash-Timer herunterzählen
-        if (this.damageFlashTimer > 0) {
-          this.damageFlashTimer -= deltaTime;
-        }
-
-        // Screen Shake Timer herunterzählen
-        if (this.screenShakeTimer > 0) {
-          this.screenShakeTimer -= deltaTime;
-        }
-
-        // Hit Marker Timer herunterzählen
-        if (this.hitMarkerTimer > 0) {
-          this.hitMarkerTimer -= deltaTime;
-        }
-
-        // Wall Impact Timer herunterzählen
-        if (this.wallImpactTimer > 0) {
-          this.wallImpactTimer -= deltaTime;
-        }
-
-        // Keycard Pickup Message Timer herunterzählen
-        if (this.keycardPickupMessage > 0) {
-          this.keycardPickupMessage -= deltaTime;
-        }
-
         // Item-Pickup prüfen
         this.checkItemPickup();
 
         // Tür-Animationen updaten
         worldState.updateWorld(deltaTime);
 
-        // Door Message Timer herunterzählen
-        if (this.doorMessageTimer > 0) {
-          this.doorMessageTimer -= deltaTime;
-        }
-
-        // Stage-Banner-Timer
-        if (this.stageBannerTimer > 0) {
-          this.stageBannerTimer -= deltaTime;
-        }
-
         // Exit-Door: Spieler mit Keycard an der Exit-Tür → nächste Stage.
-        // Edge-getriggert über `wasInteractPressedLastFrame` (oben in updatePlayer
-        // aktualisiert), damit die Stage nicht mehrfach pro Tastendruck wechselt.
         if (this.hasKeycard && this.input.isKey('KeyE') && !this.wasExitEPressed) {
           const exitDx = this.currentLevel.exit.x - this.player.x;
           const exitDy = this.currentLevel.exit.y - this.player.y;
@@ -1977,17 +2262,74 @@ export class Renderer {
         }
         this.wasExitEPressed = this.input.isKey('KeyE');
 
-        // Pointer-Lock-Verlust → Pause-Overlay zeigen
-        if (this.pointerLockAvailable && !this.input.getPointerLocked()) {
-          this.pauseOverlay.style.display = 'flex';
-        }
-
         // Prüfen ob Spieler tot ist
-        if (this.weapon.isDead()) {
+        if (this.player.health <= 0) {
+          this.player.health = 0;
+          this.inventory.reset();
           this.gameStateManager.transitionTo(GameState.DEAD);
         }
-      } else if (gameState === GameState.PAUSED) {
-        // Pause-Overlay zeigen
+      }
+
+      // Pointer-Lock-Verlust → Pause-Overlay zeigen + PAUSED state
+      // NUR in aktiven Spielzuständen (PLAYING, LOADING), nicht in MENU/DEAD/WIN.
+      // Debounce: nur bei echter Transition von locked→unlocked, nicht pro Frame wiederholen.
+      const currentLocked = this.input.getPointerLocked();
+      const currentState = this.gameStateManager.getState();
+       if (this.pointerLockAvailable && !currentLocked && !this.wasPointerLockedLastFrame &&
+           (currentState === GameState.PLAYING || currentState === GameState.LOADING)) {
+        this.gameStateManager.transitionTo(GameState.PAUSED);
+        this.pauseOverlay.style.display = 'flex';
+      }
+      this.wasPointerLockedLastFrame = currentLocked;
+
+      // --- Rendering-only state updates: Immer ausführen ---
+      // Diese Timer beeinflussen nicht die Spielwelt (Positionen, KI,
+      // Kollisionen), sondern nur visuelle Effekte im HUD/Canvas.
+      // Sie laufen auch während PAUSED weiter, damit Overlays (Pause,
+      // Schaden, Hitmarker) visuell flüssig bleiben.
+
+      // Damage-Flash-Timer
+      if (this.damageFlashTimer > 0) {
+        this.damageFlashTimer -= deltaTime;
+      }
+
+      // Screen Shake Timer
+      if (this.screenShakeTimer > 0) {
+        this.screenShakeTimer -= deltaTime;
+      }
+
+      // Hit Marker Timer
+      if (this.hitMarkerTimer > 0) {
+        this.hitMarkerTimer -= deltaTime;
+      }
+
+      // Wall Impact Timer
+      if (this.wallImpactTimer > 0) {
+        this.wallImpactTimer -= deltaTime;
+      }
+
+      // Keycard Pickup Message Timer
+      if (this.keycardPickupMessage > 0) {
+        this.keycardPickupMessage -= deltaTime;
+      }
+
+      // Door Message Timer
+      if (this.doorMessageTimer > 0) {
+        this.doorMessageTimer -= deltaTime;
+      }
+
+      // Stage-Banner-Timer
+      if (this.stageBannerTimer > 0) {
+        this.stageBannerTimer -= deltaTime;
+      }
+
+      // Weapon Flash Timer
+      if (this.weaponFlashTimer > 0) {
+        this.weaponFlashTimer -= deltaTime;
+      }
+
+      // Pause-Overlay zeigen wenn PAUSED
+      if (gameState === GameState.PAUSED) {
         if (this.pointerLockAvailable) {
           this.pauseOverlay.style.display = 'flex';
         }
@@ -2007,7 +2349,7 @@ export class Renderer {
 
       // LOADING: render loading screen, skip gameplay rendering
       if (gameState === GameState.LOADING) {
-        this.gameStateManager.render(this.ctx, SCREEN_WIDTH, SCREEN_HEIGHT, this.weapon.health, this.loadingProgress, this.loadingTargetStage);
+        this.gameStateManager.render(this.ctx, SCREEN_WIDTH, SCREEN_HEIGHT, this.player.health, this.loadingProgress, this.loadingTargetStage);
       } else {
         // Render (immer, auch im Menu)
         this.drawFloorAndCeiling();
@@ -2033,7 +2375,7 @@ export class Renderer {
         }
 
         // Game State Screens (Menu, Dead, Win, Paused)
-        this.gameStateManager.render(this.ctx, SCREEN_WIDTH, SCREEN_HEIGHT, this.weapon.health);
+        this.gameStateManager.render(this.ctx, SCREEN_WIDTH, SCREEN_HEIGHT, this.player.health);
       }
 
       // Screen Shake: Transform zurücksetzen

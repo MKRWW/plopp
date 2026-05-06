@@ -16,7 +16,9 @@ export enum SpriteType {
   BARREL = 'barrel',
   TERMINAL = 'terminal',
   LAMP = 'lamp',
-  DEBRIS = 'debris'
+  DEBRIS = 'debris',
+  WEAPON_SHOTGUN = 'weapon_shotgun',
+  WEAPON_ROCKETLAUNCHER = 'weapon_rocketlauncher'
 }
 
 /**
@@ -27,7 +29,9 @@ export function isCollectableSprite(type: SpriteType): boolean {
   return (
     type === SpriteType.AMMO ||
     type === SpriteType.HEALTH ||
-    type === SpriteType.KEYCARD
+    type === SpriteType.KEYCARD ||
+    type === SpriteType.WEAPON_SHOTGUN ||
+    type === SpriteType.WEAPON_ROCKETLAUNCHER
   );
 }
 
@@ -92,7 +96,8 @@ export class Sprite {
       }
     }
 
-    if (this.type === SpriteType.AMMO || this.type === SpriteType.HEALTH || this.type === SpriteType.KEYCARD) {
+    if (this.type === SpriteType.AMMO || this.type === SpriteType.HEALTH || this.type === SpriteType.KEYCARD ||
+        this.type === SpriteType.WEAPON_SHOTGUN || this.type === SpriteType.WEAPON_ROCKETLAUNCHER) {
       this.floatingPhase += deltaTime * 2.0;
     }
 

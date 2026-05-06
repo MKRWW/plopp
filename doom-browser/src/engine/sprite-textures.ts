@@ -37,13 +37,17 @@ export function generateSpriteTextures(): SpriteTextureSet {
   flat.set(SpriteType.HEALTH, buildRotatingItemFrames(generateHealthFront, generateHealthBack));
   flat.set(SpriteType.KEYCARD, buildRotatingItemFrames(generateKeycardFront, generateKeycardBack));
 
-  // Decor (single frame, no shadow baked in)
-  flat.set(SpriteType.BARREL, [generateBarrelTexture()]);
-  flat.set(SpriteType.TERMINAL, [generateTerminalTexture()]);
-  flat.set(SpriteType.LAMP, [generateLampTexture()]);
-  flat.set(SpriteType.DEBRIS, [generateDebrisTexture()]);
+   // Weapon pickups: 8-frame rotating sprites
+   flat.set(SpriteType.WEAPON_SHOTGUN, buildRotatingItemFrames(generateShotgunFront, generateShotgunBack));
+   flat.set(SpriteType.WEAPON_ROCKETLAUNCHER, buildRotatingItemFrames(generateRocketLauncherFront, generateRocketLauncherBack));
 
-  return { flat, enemyAngleViews };
+   // Decor (single frame, no shadow baked in)
+   flat.set(SpriteType.BARREL, [generateBarrelTexture()]);
+   flat.set(SpriteType.TERMINAL, [generateTerminalTexture()]);
+   flat.set(SpriteType.LAMP, [generateLampTexture()]);
+   flat.set(SpriteType.DEBRIS, [generateDebrisTexture()]);
+
+   return { flat, enemyAngleViews };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1300,6 +1304,261 @@ function generateDebrisTexture(): Texture {
   ctx.fillStyle = '#888';
   ctx.fillRect(cx - 4, 36, 2, 2);
   ctx.fillRect(cx + 14, 38, 1, 2);
+
+  return texFromCanvas(canvas, ctx);
+}
+
+/* ------------------------------------------------------------------ */
+/* Weapon pickup textures                                              */
+/* ------------------------------------------------------------------ */
+
+function generateShotgunFront(): Texture {
+  const canvas = document.createElement('canvas');
+  canvas.width = SPRITE_TEXTURE_SIZE;
+  canvas.height = SPRITE_TEXTURE_SIZE;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+
+  const cx = 32;
+  const cy = 36;
+
+  // Main barrel (double barrel appearance - brown/orange cylinder)
+  ctx.fillStyle = '#8B5A2B';
+  ctx.fillRect(cx - 22, cy - 4, 44, 8);
+
+  // Barrel highlight
+  ctx.fillStyle = '#A0703A';
+  ctx.fillRect(cx - 20, cy - 3, 40, 3);
+
+  // Barrel tip (metallic, right side)
+  ctx.fillStyle = '#888';
+  ctx.fillRect(cx + 20, cy - 5, 6, 10);
+  ctx.fillStyle = '#aaa';
+  ctx.fillRect(cx + 22, cy - 4, 3, 8);
+
+  // Dark opening
+  ctx.fillStyle = '#222';
+  ctx.fillRect(cx + 24, cy - 2, 2, 4);
+
+  // Stock (wood, left side)
+  ctx.fillStyle = '#6B4226';
+  ctx.beginPath();
+  ctx.moveTo(cx - 22, cy - 4);
+  ctx.lineTo(cx - 30, cy + 2);
+  ctx.lineTo(cx - 30, cy + 10);
+  ctx.lineTo(cx - 22, cy + 4);
+  ctx.closePath();
+  ctx.fill();
+
+  // Wood grain on stock
+  ctx.fillStyle = '#7A5030';
+  ctx.fillRect(cx - 28, cy + 3, 4, 1);
+  ctx.fillRect(cx - 26, cy + 6, 3, 1);
+
+  // Pump under barrel
+  ctx.fillStyle = '#555';
+  ctx.fillRect(cx - 5, cy + 4, 14, 5);
+  ctx.fillStyle = '#666';
+  ctx.fillRect(cx - 3, cy + 5, 10, 3);
+
+  // Trigger guard
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(cx - 10, cy + 10, 5, 0, Math.PI);
+  ctx.stroke();
+
+  // Subtle glow
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+  ctx.shadowColor = '#ff8833';
+  ctx.shadowBlur = 6;
+  ctx.fillStyle = 'rgba(255, 136, 51, 0.15)';
+  ctx.fillRect(cx - 22, cy - 5, 44, 12);
+  ctx.restore();
+
+  return texFromCanvas(canvas, ctx);
+}
+
+function generateShotgunBack(): Texture {
+  const canvas = document.createElement('canvas');
+  canvas.width = SPRITE_TEXTURE_SIZE;
+  canvas.height = SPRITE_TEXTURE_SIZE;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+
+  const cx = 32;
+  const cy = 36;
+
+  // Simpler back view - barrel tube
+  ctx.fillStyle = '#6B4226';
+  ctx.fillRect(cx - 22, cy - 3, 44, 6);
+
+  // Stock back
+  ctx.fillStyle = '#5A3520';
+  ctx.beginPath();
+  ctx.moveTo(cx - 22, cy - 3);
+  ctx.lineTo(cx - 28, cy + 1);
+  ctx.lineTo(cx - 28, cy + 9);
+  ctx.lineTo(cx - 22, cy + 3);
+  ctx.closePath();
+  ctx.fill();
+
+  // Pump back (darker)
+  ctx.fillStyle = '#444';
+  ctx.fillRect(cx - 5, cy + 3, 14, 4);
+
+  // Darker overall tone (back is less lit)
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+  ctx.fillRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+  ctx.restore();
+
+  return texFromCanvas(canvas, ctx);
+}
+
+function generateRocketLauncherFront(): Texture {
+  const canvas = document.createElement('canvas');
+  canvas.width = SPRITE_TEXTURE_SIZE;
+  canvas.height = SPRITE_TEXTURE_SIZE;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+
+  const cx = 32;
+  const cy = 34;
+
+  // Main tube (dark gray)
+  ctx.fillStyle = '#555';
+  ctx.fillRect(cx - 24, cy - 6, 40, 12);
+
+  // Tube highlight
+  ctx.fillStyle = '#666';
+  ctx.fillRect(cx - 22, cy - 5, 36, 4);
+
+  // Tube shadow
+  ctx.fillStyle = '#444';
+  ctx.fillRect(cx - 22, cy + 2, 36, 4);
+
+  // Red warhead tip (right side)
+  ctx.fillStyle = '#cc2222';
+  ctx.beginPath();
+  ctx.moveTo(cx + 16, cy - 6);
+  ctx.lineTo(cx + 28, cy);
+  ctx.lineTo(cx + 16, cy + 6);
+  ctx.closePath();
+  ctx.fill();
+
+  // Warhead highlight
+  ctx.fillStyle = '#ee3333';
+  ctx.beginPath();
+  ctx.moveTo(cx + 17, cy - 4);
+  ctx.lineTo(cx + 25, cy);
+  ctx.lineTo(cx + 17, cy + 1);
+  ctx.closePath();
+  ctx.fill();
+
+  // Dark opening
+  ctx.fillStyle = '#222';
+  ctx.fillRect(cx + 26, cy - 2, 3, 4);
+
+  // Green fuel tank below tube
+  ctx.fillStyle = '#228B22';
+  ctx.fillRect(cx - 10, cy + 6, 20, 8);
+  ctx.fillStyle = '#2EA02E';
+  ctx.fillRect(cx - 8, cy + 7, 16, 4);
+
+  // Tank stripe
+  ctx.fillStyle = '#1a6b1a';
+  ctx.fillRect(cx - 2, cy + 6, 4, 8);
+
+  // Stock (left side)
+  ctx.fillStyle = '#5A3520';
+  ctx.beginPath();
+  ctx.moveTo(cx - 24, cy - 6);
+  ctx.lineTo(cx - 32, cy);
+  ctx.lineTo(cx - 32, cy + 8);
+  ctx.lineTo(cx - 24, cy + 6);
+  ctx.closePath();
+  ctx.fill();
+
+  // Sight on top
+  ctx.fillStyle = '#666';
+  ctx.fillRect(cx - 2, cy - 8, 8, 3);
+  ctx.fillStyle = '#888';
+  ctx.fillRect(cx - 1, cy - 7, 2, 1);
+
+  // Trigger guard
+  ctx.strokeStyle = '#444';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(cx - 8, cy + 2, 4, 0, Math.PI);
+  ctx.stroke();
+
+  // Glow effect
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+  ctx.shadowColor = '#ff4400';
+  ctx.shadowBlur = 8;
+  ctx.fillStyle = 'rgba(255, 68, 0, 0.15)';
+  ctx.fillRect(cx - 24, cy - 7, 52, 22);
+  ctx.restore();
+
+  return texFromCanvas(canvas, ctx);
+}
+
+function generateRocketLauncherBack(): Texture {
+  const canvas = document.createElement('canvas');
+  canvas.width = SPRITE_TEXTURE_SIZE;
+  canvas.height = SPRITE_TEXTURE_SIZE;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+
+  const cx = 32;
+  const cy = 34;
+
+  // Tube back (darker)
+  ctx.fillStyle = '#444';
+  ctx.fillRect(cx - 24, cy - 5, 40, 10);
+
+  // Tube shadow (underside)
+  ctx.fillStyle = '#333';
+  ctx.fillRect(cx - 22, cy + 1, 36, 4);
+
+  // Warhead back (no visible tip from behind, just blunt end)
+  ctx.fillStyle = '#882222';
+  ctx.fillRect(cx + 16, cy - 5, 6, 10);
+
+  // Fuel tank
+  ctx.fillStyle = '#1a6b1a';
+  ctx.fillRect(cx - 10, cy + 5, 20, 7);
+  ctx.fillStyle = '#1e7a1e';
+  ctx.fillRect(cx - 8, cy + 6, 16, 3);
+
+  // Tank stripe
+  ctx.fillStyle = '#145214';
+  ctx.fillRect(cx - 2, cy + 5, 4, 7);
+
+  // Stock back
+  ctx.fillStyle = '#4a2a15';
+  ctx.beginPath();
+  ctx.moveTo(cx - 24, cy - 5);
+  ctx.lineTo(cx - 30, cy);
+  ctx.lineTo(cx - 30, cy + 7);
+  ctx.lineTo(cx - 24, cy + 5);
+  ctx.closePath();
+  ctx.fill();
+
+  // Sight back (simpler)
+  ctx.fillStyle = '#555';
+  ctx.fillRect(cx, cy - 7, 6, 2);
+
+  // Darker overall
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+  ctx.fillRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+  ctx.restore();
 
   return texFromCanvas(canvas, ctx);
 }

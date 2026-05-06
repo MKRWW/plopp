@@ -14,7 +14,9 @@ export enum SoundType {
   DAMAGE = 'damage',
   PICKUP = 'pickup',
   STEP = 'step',
-  DOOR = 'door'
+  DOOR = 'door',
+  ROCKET_SHOOT = 'rocketShoot',
+  ROCKET_EXPLOSION = 'rocketExplosion'
 }
 
 /**
@@ -175,6 +177,12 @@ export class SoundManager {
         break;
       case SoundType.DOOR:
         this.playDoor();
+        break;
+      case SoundType.ROCKET_SHOOT:
+        this.playRocketShoot();
+        break;
+      case SoundType.ROCKET_EXPLOSION:
+        this.playRocketExplosion();
         break;
     }
   }
@@ -393,7 +401,7 @@ export class SoundManager {
   }
 
   /**
-   * Tür-Öffnungs-Sound (mechanisches "Klick" + tiefes "Hum").
+   * Tür-Öffnungs-Sound (mechanisches "Klick" + tiefer "Hum").
    */
   private playDoor(): void {
     if (!this.audioContext || !this.masterGain) return;
@@ -439,5 +447,118 @@ export class SoundManager {
     oscGain.connect(this.masterGain);
     osc.start(t);
     osc.stop(t + 0.4);
+  }
+
+  /**
+   * Rocket Launcher Schuss (tiefer Whoosh + Knall).
+   */
+  private playRocketShoot(): void {
+    if (!this.audioContext || !this.masterGain) return;
+
+    const t = this.audioContext.currentTime;
+
+    // Tiefer Knall
+    const bufferSize = this.audioContext.sampleRate * 0.3;
+    const buffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.2));
+    }
+    const noise = this.audioContext.createBufferSource();
+    noise.buffer = buffer;
+
+    const filter = this.audioContext.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(2000, t);
+    filter.frequency.exponentialRampToValueAtTime(200, t + 0.25);
+
+    const noiseGain = this.audioContext.createGain();
+    noiseGain.gain.setValueAtTime(1.0, t);
+    noiseGain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
+
+    noise.connect(filter);
+    filter.connect(noiseGain);
+    noiseGain.connect(this.masterGain);
+    noise.start(t);
+    noise.stop(t + 0.3);
+
+    // Tiefer Bass-Boom
+    const osc = this.audioContext.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(100, t);
+    osc.frequency.exponentialRampToValueAtTime(30, t + 0.2);
+
+    const oscGain = this.audioContext.createGain();
+    oscGain.gain.setValueAtTime(0.6, t);
+    oscGain.gain.exponentialRampToValueAtTime(0.01, t + 0.25);
+
+    osc.connect(oscGain);
+    oscGain.connect(this.masterGain);
+    osc.start(t);
+    osc.stop(t + 0.25);
+
+    // Whoosh-Ascender
+    const osc2 = this.audioContext.createOscillator();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(80, t);
+    osc2.frequency.exponentialRampToValueAtTime(600, t + 0.4);
+
+    const osc2Gain = this.audioContext.createGain();
+    osc2Gain.gain.setValueAtTime(0.2, t);
+    osc2Gain.gain.exponentialRampToValueAtTime(0.01, t + 0.5);
+
+    osc2.connect(osc2Gain);
+    osc2Gain.connect(this.masterGain);
+    osc2.start(t);
+    osc2.stop(t + 0.5);
+  }
+
+  /**
+   * Rocket Explosion (massiver Knall + tiefer Rumble).
+   */
+  private playRocketExplosion(): void {
+    if (!this.audioContext || !this.masterGain) return;
+
+    const t = this.audioContext.currentTime;
+
+    // Massiver Noise-Burst (Explosion)
+    const bufferSize = this.audioContext.sampleRate * 0.8;
+    const buffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.25));
+    }
+    const noise = this.audioContext.createBufferSource();
+    noise.buffer = buffer;
+
+    const filter = this.audioContext.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(800, t);
+    filter.frequency.exponentialRampToValueAtTime(80, t + 0.7);
+
+    const noiseGain = this.audioContext.createGain();
+    noiseGain.gain.setValueAtTime(1.2, t);
+    noiseGain.gain.exponentialRampToValueAtTime(0.01, t + 0.8);
+
+    noise.connect(filter);
+    filter.connect(noiseGain);
+    noiseGain.connect(this.masterGain);
+    noise.start(t);
+    noise.stop(t + 0.8);
+
+    // Tiefer Rumble
+    const osc = this.audioContext.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(80, t);
+    osc.frequency.exponentialRampToValueAtTime(25, t + 0.6);
+
+    const oscGain = this.audioContext.createGain();
+    oscGain.gain.setValueAtTime(0.8, t);
+    oscGain.gain.exponentialRampToValueAtTime(0.01, t + 0.7);
+
+    osc.connect(oscGain);
+    oscGain.connect(this.masterGain);
+    osc.start(t);
+    osc.stop(t + 0.7);
   }
 }

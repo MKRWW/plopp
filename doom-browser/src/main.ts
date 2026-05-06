@@ -2,6 +2,7 @@ import { Player } from './player/player';
 import { Renderer } from './engine/renderer';
 import { GameStateManager } from './game/state';
 import { Weapon } from './game/weapon';
+import { WeaponInventory } from './game/weapons';
 import { generateLevel } from './engine/level-gen';
 import { worldState } from './engine/world';
 
@@ -28,8 +29,9 @@ function main(): void {
 
   const gameStateManager = new GameStateManager();
   const weapon = new Weapon();
+  const inventory = new WeaponInventory();
 
-  const renderer = new Renderer(player, gameStateManager, weapon, level, baseSeed);
+  const renderer = new Renderer(player, gameStateManager, weapon, inventory, level, baseSeed);
   renderer.start();
 }
 

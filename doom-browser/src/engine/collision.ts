@@ -17,6 +17,29 @@ export const PLAYER_RADIUS = 0.25;
 /** Radius eines Gegners für Kollisionszwecke (gleich wie Spieler) */
 export const ENEMY_RADIUS = 0.25;
 
+/** Radius für Rocket-Projectiles */
+export const ROCKET_RADIUS = 0.15;
+
+/**
+ * Checks if a rocket projectile at (rx, ry) would overlap with any entity
+ * in the obstacles list (e.g., enemies).
+ */
+export function rocketHitsEntity(
+  rx: number, ry: number,
+  obstacles: { x: number, y: number, radius: number }[]
+): boolean {
+  const rocketR = ROCKET_RADIUS;
+  for (const obs of obstacles) {
+    const dx = rx - obs.x;
+    const dy = ry - obs.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < rocketR + obs.radius) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Mindestabstand zwischen Spieler und Gegner (Summe der Radien + kleiner Puffer) */
 export const MIN_ENTITY_DIST = PLAYER_RADIUS + ENEMY_RADIUS + 0.05;
 

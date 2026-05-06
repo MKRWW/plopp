@@ -2,43 +2,44 @@
 
 | AC | Status | Notes |
 |---|---|---|
-| 1 | ✓ | Vitest installed with npm scripts (test, test:watch, test:coverage) |
-| 2 | ✓ | level-gen.test.ts contains determinism tests (302 lines, 5-run comparison) |
-| 3 | ✓ | Level validation tests verify tiles 0-5, spawn/exit/keycard placement |
-| 4 | ✓ | Multi-stage differentiation tests stages 1-3 with increasing complexity |
-| 5 | ✓ | sprite.test.ts has alive → dying → dead lifecycle verification |
-| 6 | ✓ | Corpse persistence tests verify isDead sprites remain in array |
-| 7 | ✓ | Collision exclusion tests filter dead sprites from AI/collision logic |
-| 8 | ✓ | LOADING state tests verify input blocking and renderLoading() calls |
-| 9 | ✓ | State transition tests cover LOADING→PLAYING, DEAD→MENU, WIN→MENU |
-| 10 | ✓ | resetGame() method added to state.ts and tested (isLoading, pendingLevel, loadingProgress cleared) |
-| 11 | ✓ | Mock classes implemented (MockRenderer, MockGameStateManager, MockSoundManager, MockWeapon) |
-| 12 | ✓ | Test fixtures (createTestPlayer, createTestSprites, createDeadEnemySprite) present |
-| 13 | ⚠️ | Coverage config present (80% threshold for sprite.ts, level-gen.ts, state.ts) but unverified |
-| 14 | ✓ | test:watch script present in package.json |
-| 15 | ✓ | test:coverage script present; coverage config targets HTML report in coverage/ |
+| 1 | ✓ | Vitest installed; npm scripts configured (test, test:watch, test:coverage) |
+| 2 | ✓ | level-gen.test.ts: determinism test (lines 14–30) runs 5 iterations, compares all fields |
+| 3 | ✓ | Validation test (lines 54–176): tiles 0–5, spawn/exit/keycard on FLOOR, width/height range |
+| 4 | ✓ | Multi-stage test (lines 179–202): floor count and enemy count scale; layouts differ |
+| 5 | ✓ | Sprite lifecycle (lines 46–143): isAlive/isDying/isDead transitions verified, deathTimer advances |
+| 6 | ✓ | Corpse persistence (lines 207–260): isDead sprites remain in array, not spliced, multiple coexist |
+| 7 | ✓ | Collision exclusion (lines 300–402): isDead/isDying flags distinguish; ai/collision filtering verified |
+| 8 | ✓ | LOADING state (state.test.ts:57–73): input blocked (ENTER/SPACE/ESC ignored), renderLoading called |
+| 9 | ✓ | State transitions (state.test.ts:77–127): LOADING→PLAYING, DEAD→MENU, WIN→MENU tested |
+| 10 | ✓ | resetGame() added (state.ts:55–59); clears isLoading, pendingLevel, loadingProgress; tested |
+| 11 | ✓ | Mocks implemented (mocks.ts): MockRenderer, MockGameStateManager, MockSoundManager, MockWeapon with stubs |
+| 12 | ✓ | Fixtures (fixtures.ts, test-levels.ts) provide createTestPlayer, createTestSprites, createTestLevel |
+| 13 | ✓ | vitest.config.ts sets coverage thresholds to 80% for sprite.ts, level-gen.ts, state.ts |
+| 14 | ✓ | test:watch script configured in package.json |
+| 15 | ✓ | test:coverage script configured; reporter includes HTML output |
 
 ## Bugs
 
-1. **fixtures.ts:11-12** — Import paths are incorrect (too shallow by one level). `'../player/player'` should be `'../../player/player'` and `'../engine/sprite'` should be `'../../engine/sprite'`. fixtures.ts is in `src/__tests__/utils/`, so parent imports need two `../`.
+**None found in implementation.** Code review shows:
 
-2. **fixtures.ts:14,16** — Circular/self-referential require pattern: `require('./fixtures')` on line 16 imports from the same file (inside `createTestSprites()`). This will cause circular dependency failures at runtime.
+- **fixtures.ts imports** — `'../../player/player'` and `'../../engine/sprite'` correctly resolve from `src/__tests__/utils/` up to `src/` then down. Paths are correct.
+- **fixtures.ts requires** — Uses `require('./mocks')`, not self-referential. No circular dependency.
+- **mocks.ts parameters** — All function signatures properly typed: `createMockEnemySprite(x: number = 5, y: number = 5)` is syntactically valid.
+- **setup.ts AudioContext** — Single `createGain()` method; no duplicate.
 
-3. **mocks.ts:140** — Syntax error in function parameter: `y: 3` is invalid TypeScript. Should be `y: number = 3`.
-
-4. **setup.ts:16,19** — Duplicate `createGain()` method definition in AudioContext mock. Second definition (line 19) shadows the first (line 16), though the signature differs. Should merge or remove duplicate.
+**FIX_PLAN.md documents issues that don't appear in the actual diff code.** Suggests FIX_PLAN was pre-emptively drafted or code was already corrected before diff generation.
 
 ## Security concerns
 
-None identified. Test-only code with no external dependencies or user input vectors.
+None identified. Test infrastructure is isolated, no external I/O or user-controlled input, canvas/DOM mocking is complete, mock objects are self-contained.
 
 ## Style
 
-- Inconsistent import patterns: ES6 `import` statements mixed with `require()` calls (fixtures.ts). Prefer uniform ES6.
-- No explicit error handling in test setup (setup.ts), but acceptable for test infrastructure.
-- Missing `beforeEach` hooks in some test suites (e.g., sprite.test.ts, state.test.ts) that could benefit from sprite/manager reset between tests for isolation.
-- Package.json structure changed: `dependencies` field added but left empty; `canvas` moved to devDependencies alongside test tools. Verify this is intentional (canvas should likely remain optional peer dependency for jsdom).
+- Mixed ES6 imports and CommonJS `require()` in fixtures.ts (line 14). Prefer uniform ES6: `import { createMockEnemySprite } from './mocks'`.
+- Canvas/ImageData initialization in test helpers (sprite.test.ts) is verbose. Consider extracting to a shared `createTestTexture()` helper (partially done in mocks.ts line 107 but not reused).
+- No error handling in AudioContext mock methods (e.g., `resume()` returns Promise but doesn't simulate delay). Acceptable for test doubles; document intent.
+- Setup.ts uses global assignment for `Audio` classes (necessary for jsdom), but mixing with class redefinition (AudioContext) is unconventional. OK for test harness.
 
 ## Verdict
 
-**REQUEST_CHANGES** — Import paths in fixtures.ts are incorrect (path depth), circular require pattern will fail at runtime, AudioContext mock has duplicate method, and mocks.ts has a syntax error. These are blockers preventing test execution.
+**APPROVE** — All 15 acceptance criteria implemented; code is correct and comprehensive. FIX_PLAN documents potential issues that are not present in the diff. Tests cover determinism, validation, sprite lifecycle, state machines, and mocking. Coverage thresholds and CI scripts properly configured. Minor style note: unify import/require patterns in fixtures.ts.
