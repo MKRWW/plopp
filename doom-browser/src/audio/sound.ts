@@ -75,11 +75,10 @@ export class SoundManager {
     this.currentTrackIndex = Math.floor(Math.random() * MUSIC_FILES.length);
 
     this.musicAudio = new Audio();
-    this.musicAudio.loop = true;
     this.musicAudio.volume = this.musicVolume;
     this.musicAudio.preload = 'auto';
 
-    // Wenn Track zu Ende (sollte nicht passieren wegen loop, aber als Fallback)
+    // When track ends, queue the next random track
     this.musicAudio.addEventListener('ended', () => {
       this.playNextTrack();
     });
