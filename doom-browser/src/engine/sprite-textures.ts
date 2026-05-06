@@ -1001,8 +1001,8 @@ function generateKeycardFront(): Texture {
   ctx.clearRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
   const cx = 32;
   const cy = 32;
-  const cardW = 36;
-  const cardH = 26;
+  const cardW = 24;
+  const cardH = 18;
   const cardX = cx - cardW / 2;
   const cardY = cy - cardH / 2;
 
@@ -1012,47 +1012,47 @@ function generateKeycardFront(): Texture {
   cardGrad.addColorStop(1, '#1a5a9c');
   ctx.fillStyle = cardGrad;
   ctx.beginPath();
-  ctx.roundRect(cardX, cardY, cardW, cardH, 3);
+  ctx.roundRect(cardX, cardY, cardW, cardH, 2);
   ctx.fill();
 
   ctx.strokeStyle = '#5ab8ff';
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.roundRect(cardX, cardY, cardW, cardH, 3);
+  ctx.roundRect(cardX, cardY, cardW, cardH, 2);
   ctx.stroke();
 
   ctx.fillStyle = '#d4a017';
-  ctx.fillRect(cardX + 4, cardY + 4, 8, 6);
+  ctx.fillRect(cardX + 2, cardY + 3, 5, 4);
   ctx.fillStyle = '#f0c040';
-  ctx.fillRect(cardX + 5, cardY + 5, 6, 4);
+  ctx.fillRect(cardX + 3, cardY + 3, 3, 2);
 
   ctx.strokeStyle = '#5ab8ff';
   ctx.beginPath();
-  ctx.moveTo(cardX + 16, cardY + 5);
-  ctx.lineTo(cardX + 28, cardY + 5);
-  ctx.lineTo(cardX + 30, cardY + 8);
+  ctx.moveTo(cardX + 11, cardY + 3);
+  ctx.lineTo(cardX + 19, cardY + 3);
+  ctx.lineTo(cardX + 20, cardY + 5);
   ctx.stroke();
   ctx.beginPath();
-  ctx.moveTo(cardX + 16, cardY + 10);
-  ctx.lineTo(cardX + 26, cardY + 10);
+  ctx.moveTo(cardX + 11, cardY + 7);
+  ctx.lineTo(cardX + 17, cardY + 7);
   ctx.stroke();
 
   ctx.fillStyle = '#5ab8ff';
-  ctx.fillRect(cardX + 4, cardY + 16, 2, 8);
-  ctx.fillRect(cardX + 8, cardY + 16, 1, 8);
-  ctx.fillRect(cardX + 11, cardY + 16, 3, 8);
-  ctx.fillRect(cardX + 16, cardY + 16, 1, 8);
-  ctx.fillRect(cardX + 19, cardY + 16, 2, 8);
-  ctx.fillRect(cardX + 23, cardY + 16, 1, 8);
-  ctx.fillRect(cardX + 26, cardY + 16, 3, 8);
+  ctx.fillRect(cardX + 2, cardY + 11, 1, 5);
+  ctx.fillRect(cardX + 5, cardY + 11, 1, 5);
+  ctx.fillRect(cardX + 7, cardY + 11, 2, 5);
+  ctx.fillRect(cardX + 11, cardY + 11, 1, 5);
+  ctx.fillRect(cardX + 13, cardY + 11, 1, 5);
+  ctx.fillRect(cardX + 15, cardY + 11, 1, 5);
+  ctx.fillRect(cardX + 17, cardY + 11, 2, 5);
 
   ctx.save();
   ctx.globalCompositeOperation = 'source-atop';
   ctx.shadowColor = '#5ab8ff';
-  ctx.shadowBlur = 12;
+  ctx.shadowBlur = 8;
   ctx.fillStyle = 'rgba(90, 184, 255, 0.35)';
   ctx.beginPath();
-  ctx.roundRect(cardX, cardY, cardW, cardH, 3);
+  ctx.roundRect(cardX, cardY, cardW, cardH, 2);
   ctx.fill();
   ctx.restore();
 
@@ -1067,8 +1067,8 @@ function generateKeycardBack(): Texture {
   ctx.clearRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
   const cx = 32;
   const cy = 32;
-  const cardW = 36;
-  const cardH = 26;
+  const cardW = 24;
+  const cardH = 18;
   const cardX = cx - cardW / 2;
   const cardY = cy - cardH / 2;
 
@@ -1078,25 +1078,25 @@ function generateKeycardBack(): Texture {
   cardGrad.addColorStop(1, '#103a66');
   ctx.fillStyle = cardGrad;
   ctx.beginPath();
-  ctx.roundRect(cardX, cardY, cardW, cardH, 3);
+  ctx.roundRect(cardX, cardY, cardW, cardH, 2);
   ctx.fill();
 
   ctx.strokeStyle = '#3a90d8';
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.roundRect(cardX, cardY, cardW, cardH, 3);
+  ctx.roundRect(cardX, cardY, cardW, cardH, 2);
   ctx.stroke();
 
   // Magnetic stripe across the back
   ctx.fillStyle = '#0a1a2a';
-  ctx.fillRect(cardX + 2, cardY + 8, cardW - 4, 5);
+  ctx.fillRect(cardX + 1, cardY + 5, cardW - 2, 3);
 
   // Subtle edge highlight only
   ctx.save();
   ctx.globalCompositeOperation = 'source-atop';
   ctx.fillStyle = 'rgba(90, 184, 255, 0.10)';
   ctx.beginPath();
-  ctx.roundRect(cardX, cardY, cardW, cardH, 3);
+  ctx.roundRect(cardX, cardY, cardW, cardH, 2);
   ctx.fill();
   ctx.restore();
 
