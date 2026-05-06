@@ -96,18 +96,13 @@ export class Sprite {
       }
     }
 
-    if (this.type === SpriteType.AMMO || this.type === SpriteType.HEALTH || this.type === SpriteType.KEYCARD ||
-        this.type === SpriteType.WEAPON_SHOTGUN || this.type === SpriteType.WEAPON_ROCKETLAUNCHER) {
+    if (this.type === SpriteType.ENEMY) {
       this.floatingPhase += deltaTime * 2.0;
-    }
-
-    if (this.type === SpriteType.LAMP) {
-      this.floatingPhase += deltaTime * 3.0;
     }
   }
 
   public getFloatingOffset(): number {
-    if (this.type === SpriteType.AMMO || this.type === SpriteType.HEALTH || this.type === SpriteType.KEYCARD) {
+    if (this.type === SpriteType.ENEMY) {
       return Math.sin(this.floatingPhase) * 0.05;
     }
     return 0;
