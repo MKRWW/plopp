@@ -103,7 +103,7 @@ export class GameStateManager {
     ctx.textAlign = 'center';
     ctx.shadowColor = '#ff0000';
     ctx.shadowBlur = 20;
-    ctx.fillText('DOOM', w / 2, h / 2 - 80);
+    ctx.fillText('PLOPP', w / 2, h / 2 - 80);
     ctx.shadowBlur = 0;
 
     // Untertitel
