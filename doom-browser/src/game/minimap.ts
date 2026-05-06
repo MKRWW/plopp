@@ -29,7 +29,6 @@ const COLORS = {
   floor: '#222',
   player: '#0f0',
   playerDir: '#0a0',
-  enemy: '#f00',
   ammo: '#ff0',
   health: '#0f0',
   border: '#888'
@@ -90,12 +89,6 @@ export class Minimap {
         '#5af';
       this.renderSpriteDot(ctx, sprite.x, sprite.y, TILE_SIZE,
         color);
-    }
-
-    for (const sprite of sprites) {
-      if (sprite.type !== SpriteType.ENEMY) continue;
-      if (!sprite.isAlive) continue;
-      this.renderSpriteDot(ctx, sprite.x, sprite.y, TILE_SIZE, COLORS.enemy);
     }
 
     this.renderPlayer(ctx, player, TILE_SIZE);
