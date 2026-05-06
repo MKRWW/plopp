@@ -1,200 +1,95 @@
-# SPEC: Fix Black Screen — Add missing shotguns/rocketLaunchers to Level interface
+# SPEC: Random Background Music Track Rotation
 
 ## 0. Existing Code Baseline
 
-| File | Relevant State |
+| File | Relevant Content |
 |---|---|
-| `src/engine/level-gen.ts` | `Level` interface (lines 34-52) has NO `shotguns` or `rocketLaunchers` properties. `generateLevel()` return (lines 629-644) does NOT include them. |
-| `src/engine/renderer.ts` | `initializeSprites()` at lines 534-550 iterates `level.shotguns` and `level.rocketLaunchers` — **these are undefined, causing runtime crash → black screen** |
-| `src/engine/sprite.ts` | `SpriteType` enum already has `WEAPON_SHOTGUN` and `WEAPON_ROCKETLAUNCHER`. `isCollectableSprite()` already returns true for both. |
-| `src/engine/sprite-textures.ts` | `generateSpriteTextures()` already generates textures for both weapon types. |
-| `src/engine/level-gen.test.ts` | Root-level test file, checks determinism, validation, structural integrity. |
-| `src/engine/__tests__/level-gen.test.ts` | `__tests__/` version of the same tests. |
+| `src/audio/sound.ts` | `SoundManager` class; `initMusic()` sets `musicAudio.loop = true` (line 78); `ended` listener calls `playNextTrack()` (lines 83-85); `playNextTrack()` picks random non-repeating track and plays if `musicPlaying` is true (lines 104-116); `startMusic()` sets `musicPlaying = true` and calls `.play()` (lines 121-127) |
+| `src/__tests__/utils/mocks.ts` | `MockSoundManager` with stub impl for `init`, `play`, `startMusic`, `stopMusic`, etc. |
+| `src/engine/renderer.ts` | Creates `SoundManager` (line 155), calls `soundManager.startMusic()` at game start (line 2116) |
+| `package.json` | TypeScript + Vite; `npm run build`, `npm test` (vitest) |
 
-## 1. Summary
+## 1. Feature Summary
 
-Fix a runtime crash (black screen) caused by `renderer.ts` iterating over `level.shotguns` and `level.rocketLaunchers` which are not defined in the `Level` interface or produced by `generateLevel()`.
+The game currently plays a single random background music track on infinite loop for the entire session. The existing `ended` event handler and `playNextTrack()` method are already wired but never trigger because `loop = true`. Removing the infinite loop enables the 12 music tracks to rotate randomly during gameplay, improving audio variety without repeating the same track back-to-back.
 
 ## 2. Scope
 
 **In scope**:
-- Add `shotguns: Vec2[]` and `rocketLaunchers: Vec2[]` to the `Level` interface
-- Generate weapon pickup positions in `generateLevel()` with stage-based scaling
-- Return these arrays in the generated Level object
-- Update both test files with assertions for the new properties
+- Remove `musicAudio.loop = true` in `initMusic()` so tracks play once
+- Verify existing `ended` → `playNextTrack()` chain works correctly without modification
 
 **Out of scope**:
-- Changes to `sprite.ts`, `sprite-textures.ts`, `renderer.ts`, `world.ts`
-- Changes to weapon rendering, firing, or inventory logic
+- Adding new music tracks or audio files
+- Cross-fading between tracks
+- Music pausing/resuming on game pause
+- Changes to procedural sound effects (SFX are unaffected)
+- UI volume controls or music menu
 
 ## 3. Technical Context
 
-- **Language**: TypeScript 5.4
-- **Framework**: Vite 5.4
-- **Build**: `npm run build`
-- **Test**: `npm test` (vitest, jsdom)
-- **Pattern**: Use existing `randomFloorInRoom(room, rng, used)` helper, same as ammo/health/decor
+- **Language & runtime**: TypeScript 5.4, browser environment (Chrome/Firefox/Safari)
+- **Framework**: Vite 5.4, Vitest 4.1.5 (jsdom)
+- **Build command**: `npm run build`
+- **Test command**: `npm test`
+- **Existing modules**: `src/audio/sound.ts` (SoundManager), `src/engine/renderer.ts` (consumer)
+- **Architectural constraints**: No external dependencies; all audio via Web Audio API or `HTMLAudioElement`
+- **Dependencies**: None added
 
 ## 4. Interfaces & Contracts
 
-### 4.1 Level Interface additions (after `decor` line)
+No new interfaces. Two existing private methods whose behavior is affected (no signature changes):
 
 ```typescript
-/** Shotgun weapon pickups (appear from stage 2 onwards). */
-shotguns: Vec2[];
-/** Rocket Launcher weapon pickups (appear from stage 4 onwards). */
-rocketLaunchers: Vec2[];
+// src/audio/sound.ts — existing, no signature change
+class SoundManager {
+  private initMusic(): void;
+  private playNextTrack(): void;
+}
 ```
-
-### 4.2 Stage scaling formulas
-
-| Property | Count formula | Effect |
-|---|---|---|
-| `shotguns` | `stage >= 2 ? 1 + Math.floor((stage - 2) / 2) : 0` | s1→0, s2-3→1, s4-5→2, s6+→3 |
-| `rocketLaunchers` | `stage >= 4 ? Math.floor((stage - 4) / 3) + 1 : 0` | s1-3→0, s4-6→1, s7+→2 |
 
 ## 5. Tasks
 
 ---
-**Task 1 – Add shotguns and rocketLaunchers to Level interface**
+**Task 1 – Disable infinite loop on music playback**
 
-**Goal**: Extend the `Level` interface with two new required properties.
+**Goal**: Remove the `loop = true` assignment so that each track plays once and the `ended` event fires.
 
-**Input files**: `src/engine/level-gen.ts`
+**Input files**: `src/audio/sound.ts`
 
-**Output files**: `src/engine/level-gen.ts`
-
-**Instructions**:
-1. Read the `Level` interface (lines 34-52).
-2. After the `decor: DecorPlacement[];` line, append:
-   ```typescript
-   /** Shotgun weapon pickups (appear from stage 2 onwards). */
-   shotguns: Vec2[];
-   /** Rocket Launcher weapon pickups (appear from stage 4 onwards). */
-   rocketLaunchers: Vec2[];
-   ```
-3. That is the only change in this task.
-
-**Done when**: `npm run build` succeeds (or `npx tsc --noEmit` reports no errors).
-
----
-**Task 2 – Generate weapon pickups in generateLevel()**
-
-**Goal**: Populate `shotguns` and `rocketLaunchers` arrays in `generateLevel()` and include them in the return object.
-
-**Input files**: `src/engine/level-gen.ts`
-
-**Output files**: `src/engine/level-gen.ts`
+**Output files**: `src/audio/sound.ts` (modified)
 
 **Instructions**:
-1. Immediately BEFORE the `const facing = spawnFacing(...)` line (around line 627), add:
-   ```typescript
-   // --- Shotgun pickups (stage 2+) ---
-   const numShotguns = stage >= 2 ? 1 + Math.floor((stage - 2) / 2) : 0;
-   const shotguns: Vec2[] = [];
-   for (let i = 0; i < numShotguns; i++) {
-     const room = rooms[Math.floor(rng() * rooms.length)];
-     const tile = randomFloorInRoom(room, rng, used);
-     if (!tile) continue;
-     shotguns.push({ x: tile.x + 0.5, y: tile.y + 0.5 });
-   }
+1. In `src/audio/sound.ts`, in the `initMusic()` method, remove the line `this.musicAudio.loop = true;` (currently line 78).
+2. Delete the now-stale comment above it: `// Wenn Track zu Ende (sollte nicht passieren wegen loop, aber als Fallback)` (line 82).
+3. Replace it with this updated comment: `// When track ends, queue the next random track`.
+4. Do not modify `playNextTrack()`, `startMusic()`, `loadTrack()`, or any other method.
 
-   // --- Rocket Launcher pickups (stage 4+) ---
-   const numRocketLaunchers = stage >= 4 ? Math.floor((stage - 4) / 3) + 1 : 0;
-   const rocketLaunchers: Vec2[] = [];
-   for (let i = 0; i < numRocketLaunchers; i++) {
-     const room = rooms[Math.floor(rng() * rooms.length)];
-     const tile = randomFloorInRoom(room, rng, used);
-     if (!tile) continue;
-     rocketLaunchers.push({ x: tile.x + 0.5, y: tile.y + 0.5 });
-   }
-   ```
-2. In the return object, after the `decor,` line, append:
-   ```typescript
-   shotguns,
-   rocketLaunchers,
-   ```
-
-**Done when**: `npm run build` succeeds with no errors.
+**Done when**: `npm run build` succeeds with no type errors; the `musicAudio.loop` property is no longer assigned in `initMusic()`.
 
 ---
-**Task 3 – Update root-level test file**
-
-**Goal**: Extend `src/engine/level-gen.test.ts` with assertions for the new properties.
-
-**Input files**: `src/engine/level-gen.test.ts`
-
-**Output files**: `src/engine/level-gen.test.ts`
-
-**Instructions**:
-1. In the "same seed + stage produces identical" test, add after the `decor` assertion:
-   ```typescript
-   expect(levels[i].shotguns).toEqual(levels[0].shotguns);
-   expect(levels[i].rocketLaunchers).toEqual(levels[0].rocketLaunchers);
-   ```
-2. In the "Level Generation - Structural Integrity" suite, add:
-   ```typescript
-   it('stage 1 has no shotgun or rocket launcher pickups', () => {
-     const level = generateLevel(5000, 1);
-     expect(level.shotguns.length).toBe(0);
-     expect(level.rocketLaunchers.length).toBe(0);
-   });
-
-   it('stage 2+ has shotgun pickups, stage 4+ has rocket launcher pickups', () => {
-     const l2 = generateLevel(5001, 2);
-     const l4 = generateLevel(5002, 4);
-     const l5 = generateLevel(5003, 5);
-     expect(l2.shotguns.length).toBeGreaterThanOrEqual(1);
-     expect(l2.rocketLaunchers.length).toBe(0);
-     expect(l4.shotguns.length).toBeGreaterThanOrEqual(1);
-     expect(l4.rocketLaunchers.length).toBeGreaterThanOrEqual(1);
-     expect(l5.shotguns.length).toBeGreaterThanOrEqual(l4.shotguns.length);
-     expect(l5.rocketLaunchers.length).toBeGreaterThanOrEqual(l4.rocketLaunchers.length);
-   });
-   ```
-
-**Done when**: `npm test` passes all test cases.
-
----
-**Task 4 – Update __tests__/level-gen.test.ts**
-
-**Goal**: Apply the same test updates to `src/engine/__tests__/level-gen.test.ts`.
-
-**Input files**: `src/engine/__tests__/level-gen.test.ts`
-
-**Output files**: `src/engine/__tests__/level-gen.test.ts`
-
-**Instructions**: Same as Task 3 but with seeds offset by 2 (5004, 5005, 5006, 5007 instead of 5000-5003).
-
-**Done when**: `npm test` passes all test cases in both test files.
 
 ## 6. Integration Points
 
-- `level-gen.ts` → `renderer.ts`: `initializeSprites()` already reads `level.shotguns` and `level.rocketLaunchers` — no renderer changes needed.
-- `level-gen.ts` → `world.ts`: `loadLevel(level)` accepts the expanded interface.
-- `level-gen.ts` → both test files: must verify new properties.
+No integration changes required. The `ended` → `playNextTrack()` listener was already registered in `initMusic()`. The only behavioral change is that the `ended` event now fires naturally when each track completes, triggering existing rotation logic.
 
 ## 7. Acceptance Criteria
 
-1. `npm run build` succeeds with no errors
-2. `npm test` passes all existing and new test cases
-3. `generateLevel(42, 1).shotguns` returns `[]`
-4. `generateLevel(42, 1).rocketLaunchers` returns `[]`
-5. `generateLevel(42, 2).shotguns.length` >= 1
-6. `generateLevel(42, 4).rocketLaunchers.length` >= 1
-7. Five calls with identical (seed, stage) produce identical `shotguns` and `rocketLaunchers` arrays
-8. Game no longer crashes on startup with black screen
+1. `musicAudio.loop` is NOT set to `true` anywhere in `src/audio/sound.ts`.
+2. The `ended` event listener on `musicAudio` remains registered in `initMusic()`.
+3. `playNextTrack()` still selects a random index ≠ `currentTrackIndex` when `MUSIC_FILES.length > 1`.
+4. `playNextTrack()` still calls `this.musicAudio.play()` when `musicPlaying` is `true`.
+5. `npm run build` passes with zero errors.
 
 ## 8. Test Requirements
 
-- **Task 3**: Determinism check in existing "same seed" test + 2 new test cases in Structural Integrity suite
-- **Task 4**: Same as Task 3 but in `__tests__/` file with offset seeds
-- No mocking needed — pure functions with deterministic PRNG
+No new test file required. The existing `MockSoundManager` in `src/__tests__/utils/mocks.ts` does not use `HTMLAudioElement` and is unaffected.
 
 ## 9. Assumptions & Decisions
 
-| # | Decision | Rationale |
+| # | Assumption | Rationale |
 |---|---|---|
-| 1 | Weapon pickups can spawn in ANY room (including spawn) | Matches existing pattern for ammo/health/decor |
-| 2 | Properties are required (`Vec2[]` not `Vec2[] \| undefined`) | Renderer assumes they exist; empty array is safe |
-| 3 | New pickups added to `used` Set | Prevents overlapping placements — consistent with all other logic |
+| 1 | The `ended` → `playNextTrack()` chain is functionally correct as-is | Code review confirms the existing code is correct. |
+| 2 | No cross-fade is needed between tracks | The feature description does not mention it. |
+| 3 | `musicAudio` is a singleton per `SoundManager` instance | Confirmed by code. |
+| 4 | Browser autoplay policy is handled by existing `.catch(() => {})` | The current `startMusic()` already silently swallows autoplay rejection. |
