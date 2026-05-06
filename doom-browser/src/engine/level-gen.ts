@@ -49,6 +49,10 @@ export interface Level {
   /** Bonus pickup behind a SECRET_WALL, if a secret room was placed. */
   secretHealth: Vec2 | null;
   decor: DecorPlacement[];
+  /** Shotgun weapon pickups (appear from stage 2 onwards). */
+  shotguns: Vec2[];
+  /** Rocket Launcher weapon pickups (appear from stage 4 onwards). */
+  rocketLaunchers: Vec2[];
 }
 
 interface Room { x: number; y: number; w: number; h: number; }
@@ -281,6 +285,119 @@ function shuffle<T>(arr: T[], rng: () => number): void {
 }
 
 /**
+ * Pick a room from candidates using a weighted random selection biased toward
+ * greater Manhattan distance from spawnCenter. Each room's selection weight is
+ * its Manhattan distance from spawnCenter. If all candidates have distance 0,
+ * falls back to uniform random.
+ *
+ * @returns A { room, distance } pair, or null if candidates is empty.
+ */
+function weightedRandomByDistance(
+  candidates: Array<{ room: Room; distance: number }>,
+  rng: () => number
+): { room: Room; distance: number } | null {
+  if (candidates.length === 0) return null;
+  const totalWeight = candidates.reduce((sum, c) => sum + c.distance, 0);
+  if (totalWeight === 0) {
+    const pick = candidates[Math.floor(rng() * candidates.length)];
+    return pick;
+  }
+  let threshold = rng() * totalWeight;
+  for (const c of candidates) {
+    threshold -= c.distance;
+    if (threshold <= 0) return c;
+  }
+  return candidates[candidates.length - 1];
+}
+
+/**
+ * Pick a floor tile in one of the four corners of the room. A "corner tile" is
+ * a floor tile that is adjacent to both walls meeting at a corner (i.e. 1 tile
+ * inside from each of the two walls). Among all valid corner tiles across all
+ * 4 corners, pick one uniformly at random. Returns null if no corner tile is
+ * available (room too small — min 3x3).
+ *
+ * Falls back to roomCenter() if no corner tile found (safety net).
+ */
+function pickCornerTile(
+  room: Room,
+  map: number[][],
+  rng: () => number,
+  used: Set<string>
+): Vec2 {
+  const corners: [number, number][] = [
+    [room.x + 1, room.y + 1],
+    [room.x + room.w - 2, room.y + 1],
+    [room.x + 1, room.y + room.h - 2],
+    [room.x + room.w - 2, room.y + room.h - 2],
+  ];
+
+  const validTiles: Vec2[] = [];
+  for (const [cx, cy] of corners) {
+    const offsets = [
+      [0, 0], [1, 0], [0, 1], [-1, 0], [0, -1], [1, 1], [-1, -1],
+    ];
+    for (const [dx, dy] of offsets) {
+      const tx = cx + dx, ty = cy + dy;
+      if (tx < room.x || tx >= room.x + room.w || ty < room.y || ty >= room.y + room.h) continue;
+      if (map[ty][tx] !== TILE.FLOOR) continue;
+      const key = `${tx},${ty}`;
+      if (used.has(key)) continue;
+      // Ensure at least one cardinal neighbor is non-FLOOR (wall-adjacency for corner property)
+      const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const;
+      let adjWall = false;
+      for (const [ddx, ddy] of dirs) {
+        const nx = tx + ddx, ny = ty + ddy;
+        if (nx < 0 || ny < 0 || nx >= map[0].length || ny >= map.length) { adjWall = true; break; }
+        if (map[ny][nx] !== TILE.FLOOR) { adjWall = true; break; }
+      }
+      if (!adjWall) continue;
+      validTiles.push({ x: tx, y: ty });
+    }
+  }
+
+  if (validTiles.length === 0) {
+    const center = roomCenter(room);
+    used.add(`${center.x},${center.y}`);
+    return center;
+  }
+
+  const pick = validTiles[Math.floor(rng() * validTiles.length)];
+  used.add(`${pick.x},${pick.y}`);
+  return pick;
+}
+
+/**
+ * Find a free floor tile adjacent (within Chebyshev distance 2) to the
+ * keycard tile, within the same room, not yet used. Returns the tile or null.
+ * Expanded from distance 1 to handle 3x3 rooms where the keycard is in a
+ * corner and all distance-1 neighbors are walls.
+ */
+function placeCoverDecor(
+  room: Room,
+  map: number[][],
+  keycardTile: Vec2,
+  rng: () => number,
+  used: Set<string>
+): Vec2 | null {
+  const neighbors: Vec2[] = [];
+  for (let dy = -2; dy <= 2; dy++) {
+    for (let dx = -2; dx <= 2; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      const nx = keycardTile.x + dx, ny = keycardTile.y + dy;
+      if (nx < room.x || nx >= room.x + room.w || ny < room.y || ny >= room.y + room.h) continue;
+      if (map[ny][nx] !== TILE.FLOOR) continue;
+      if (used.has(`${nx},${ny}`)) continue;
+      neighbors.push({ x: nx, y: ny });
+    }
+  }
+  if (neighbors.length === 0) return null;
+  const pick = neighbors[Math.floor(rng() * neighbors.length)];
+  used.add(`${pick.x},${pick.y}`);
+  return pick;
+}
+
+/**
  * Try to embed a 1x1 secret pocket: a wall tile on a room's perimeter that has
  * solid wall on its outside neighbor. Convert the wall to SECRET_WALL, the
  * outside neighbor to FLOOR, and place a health bonus there.
@@ -429,28 +546,41 @@ export function generateLevel(seed: number, stage: number): Level {
     if (!bluePos) continue;
     // bluePos already mutated map to BLUE_KEY_DOOR.
 
-    // Keycard: pick a non-spawn, non-exit room reachable WITHOUT blue door.
+    // Keycard: pick a non-spawn, non-exit room reachable WITHOUT blue door (with distance bias + corner placement).
     const reachableNoBlue = bfsReachable(map, spawn, new Set());
-    const candidateRooms = rooms
-      .map((r, i) => ({ r, i }))
-      .filter(({ i }) => i !== 0 && i !== exitIdx);
-    shuffle(candidateRooms, rng);
+    const reachableRooms = rooms
+      .map((r, i) => ({
+        room: r,
+        i,
+        distance: Math.abs(roomCenter(r).x - spawn.x) + Math.abs(roomCenter(r).y - spawn.y),
+      }))
+      .filter(({ i, room }) =>
+        i !== 0 &&
+        i !== exitIdx &&
+        reachableNoBlue[room.y + Math.floor(room.h / 2)][room.x + Math.floor(room.w / 2)]
+      );
 
-    let keycardTile: Vec2 | null = null;
-    for (const { r } of candidateRooms) {
-      const c = roomCenter(r);
-      if (reachableNoBlue[c.y][c.x]) {
-        keycardTile = c;
-        break;
-      }
-    }
-    if (!keycardTile) continue;
+    if (reachableRooms.length === 0) continue;
+
+    const picked = weightedRandomByDistance(reachableRooms, rng);
+    if (!picked) continue;
 
     // From here generation succeeded structurally. Place sprites.
-    const used = new Set<string>();
+    const used = new Set<string>(); // moved before keycard so pickCornerTile can reserve the tile; shifts downstream RNG but stays deterministic
     used.add(`${spawnTile.x},${spawnTile.y}`);
-    used.add(`${keycardTile.x},${keycardTile.y}`);
     used.add(`${exitDoor.access.x},${exitDoor.access.y}`);
+
+    const keycardRoom = picked.room;
+    const keycardTile = pickCornerTile(keycardRoom, map, rng, used);
+
+    // Cover decor: place one decorative sprite adjacent to keycard
+    const decor: DecorPlacement[] = [];
+    const coverTile = placeCoverDecor(keycardRoom, map, keycardTile, rng, used);
+    if (coverTile) {
+      const coverTypes = [SpriteType.BARREL, SpriteType.DEBRIS, SpriteType.TERMINAL];
+      const coverType = coverTypes[Math.floor(rng() * 3)];
+      decor.push({ x: coverTile.x + 0.5, y: coverTile.y + 0.5, type: coverType });
+    }
 
     // Optional secret room (50% on stage 2+, otherwise skipped).
     let secretHealth: Vec2 | null = null;
@@ -490,13 +620,32 @@ export function generateLevel(seed: number, stage: number): Level {
 
     // --- Decor ---
     const numDecor = 4 + Math.floor(stage / 2);
-    const decor: DecorPlacement[] = [];
     for (let i = 0; i < numDecor; i++) {
       const room = rooms[Math.floor(rng() * rooms.length)];
       const tile = randomFloorInRoom(room, rng, used);
       if (!tile) continue;
       const type = DECOR_TYPES[Math.floor(rng() * DECOR_TYPES.length)];
       decor.push({ x: tile.x + 0.5, y: tile.y + 0.5, type });
+    }
+
+    // --- Shotgun pickups (stage 2+) ---
+    const numShotguns = stage >= 2 ? 1 + Math.floor((stage - 2) / 2) : 0;
+    const shotguns: Vec2[] = [];
+    for (let i = 0; i < numShotguns; i++) {
+      const room = rooms[Math.floor(rng() * rooms.length)];
+      const tile = randomFloorInRoom(room, rng, used);
+      if (!tile) continue;
+      shotguns.push({ x: tile.x + 0.5, y: tile.y + 0.5 });
+    }
+
+    // --- Rocket Launcher pickups (stage 4+) ---
+    const numRocketLaunchers = stage >= 4 ? Math.floor((stage - 4) / 3) + 1 : 0;
+    const rocketLaunchers: Vec2[] = [];
+    for (let i = 0; i < numRocketLaunchers; i++) {
+      const room = rooms[Math.floor(rng() * rooms.length)];
+      const tile = randomFloorInRoom(room, rng, used);
+      if (!tile) continue;
+      rocketLaunchers.push({ x: tile.x + 0.5, y: tile.y + 0.5 });
     }
 
     const facing = spawnFacing(spawnRoom, spawn);
@@ -516,6 +665,8 @@ export function generateLevel(seed: number, stage: number): Level {
       health,
       secretHealth,
       decor,
+      shotguns,
+      rocketLaunchers,
     };
   }
 
