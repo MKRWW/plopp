@@ -45,6 +45,12 @@ export class Renderer {
   // Delta-Time tracking
   private lastTime: number = 0;
 
+  // FPS counter
+  private frameCount: number = 0;
+  private fps: number = 0;
+  private fpsTimer: number = 0;
+  private readonly fpsInterval: number = 0.5; // update FPS every 500ms
+
   // Sprint-Status für HUD
   private isSprinting: boolean = false;
 
@@ -2129,6 +2135,15 @@ export class Renderer {
       const deltaTime = (currentTime - this.lastTime) / 1000.0;
       this.lastTime = currentTime;
 
+      // FPS counter
+      this.frameCount++;
+      this.fpsTimer -= deltaTime;
+      if (this.fpsTimer <= 0) {
+        this.fps = Math.round(this.frameCount / (this.fpsInterval + this.fpsTimer));
+        this.frameCount = 0;
+        this.fpsTimer = this.fpsInterval;
+      }
+
       // Game State prüfen
       const gameState = this.gameStateManager.getState();
 
@@ -2397,6 +2412,12 @@ export class Renderer {
 
         // Game State Screens (Menu, Dead, Win, Paused)
         this.gameStateManager.render(this.ctx, SCREEN_WIDTH, SCREEN_HEIGHT, this.player.health);
+
+        // FPS Counter (always visible, drawn on top of everything, above minimap)
+        this.ctx.textAlign = 'left';
+        this.ctx.font = 'bold 10px monospace';
+        this.ctx.fillStyle = '#0f0';
+        this.ctx.fillText(`${this.fps} FPS`, 10, 9);
       }
 
       // Screen Shake: Transform zurücksetzen

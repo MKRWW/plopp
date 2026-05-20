@@ -72,12 +72,16 @@ export class Minimap {
   private renderNormal(player: Player, sprites: Sprite[]): void {
     const ctx = this.ctx;
     const reachable = this.computeReachableTiles(player);
+    const centerX = MINIMAP_SIZE / 2;
+    const centerY = MINIMAP_SIZE / 2;
+    const offsetX = centerX - player.x * TILE_SIZE;
+    const offsetY = centerY - player.y * TILE_SIZE;
 
     ctx.clearRect(0, 0, DEBUG_SIZE, DEBUG_SIZE);
     ctx.fillStyle = COLORS.background;
     ctx.fillRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
 
-    this.renderMap(ctx, TILE_SIZE, reachable);
+    this.renderMap(ctx, TILE_SIZE, reachable, offsetX, offsetY);
 
     for (const sprite of sprites) {
       if (sprite.type === SpriteType.ENEMY) continue;
@@ -87,11 +91,10 @@ export class Minimap {
         sprite.type === SpriteType.AMMO ? COLORS.ammo :
         sprite.type === SpriteType.HEALTH ? COLORS.health :
         '#5af';
-      this.renderSpriteDot(ctx, sprite.x, sprite.y, TILE_SIZE,
-        color);
+      this.renderSpriteDot(ctx, sprite.x, sprite.y, TILE_SIZE, offsetX, offsetY, color);
     }
 
-    this.renderPlayer(ctx, player, TILE_SIZE);
+    this.renderPlayer(ctx, player, TILE_SIZE, centerX, centerY);
 
     ctx.strokeStyle = COLORS.border;
     ctx.lineWidth = MINIMAP_BORDER;
@@ -101,26 +104,30 @@ export class Minimap {
   private renderDebug(player: Player, sprites: Sprite[]): void {
     const ctx = this.ctx;
     const tile = DEBUG_TILE;
+    const centerX = DEBUG_SIZE / 2;
+    const centerY = DEBUG_SIZE / 2;
+    const offsetX = centerX - player.x * tile;
+    const offsetY = centerY - player.y * tile;
 
     ctx.clearRect(0, 0, DEBUG_SIZE, DEBUG_SIZE);
     ctx.fillStyle = 'rgba(0,0,0,0.85)';
     ctx.fillRect(0, 0, DEBUG_SIZE, DEBUG_SIZE);
 
-    this.renderMap(ctx, tile);
+    this.renderMap(ctx, tile, undefined, offsetX, offsetY);
 
     // Tile-Gitter
     ctx.strokeStyle = 'rgba(255,255,255,0.08)';
     ctx.lineWidth = 1;
     for (let i = 0; i <= MAP_WIDTH; i++) {
       ctx.beginPath();
-      ctx.moveTo(i * tile, 0);
-      ctx.lineTo(i * tile, MAP_HEIGHT * tile);
+      ctx.moveTo(i * tile + offsetX, 0);
+      ctx.lineTo(i * tile + offsetX, MAP_HEIGHT * tile + offsetY);
       ctx.stroke();
     }
     for (let j = 0; j <= MAP_HEIGHT; j++) {
       ctx.beginPath();
-      ctx.moveTo(0, j * tile);
-      ctx.lineTo(MAP_WIDTH * tile, j * tile);
+      ctx.moveTo(0, j * tile + offsetY);
+      ctx.lineTo(MAP_WIDTH * tile + offsetX, j * tile + offsetY);
       ctx.stroke();
     }
 
@@ -129,22 +136,22 @@ export class Minimap {
       if (sprite.type === SpriteType.ENEMY) continue;
       if (!isCollectableSprite(sprite.type)) {
         // Deko-Sprites neutral grau
-        this.renderSpriteDot(ctx, sprite.x, sprite.y, tile, '#888');
+        this.renderSpriteDot(ctx, sprite.x, sprite.y, tile, offsetX, offsetY, '#888');
         continue;
       }
       const color =
         sprite.type === SpriteType.AMMO ? COLORS.ammo :
         sprite.type === SpriteType.HEALTH ? COLORS.health :
         '#5af';
-      this.renderSpriteDot(ctx, sprite.x, sprite.y, tile, color);
+      this.renderSpriteDot(ctx, sprite.x, sprite.y, tile, offsetX, offsetY, color);
     }
 
     // Gegner mit Kollisionskreis
     for (const sprite of sprites) {
       if (sprite.type !== SpriteType.ENEMY) continue;
       if (!sprite.isAlive) continue;
-      const ex = sprite.x * tile;
-      const ey = sprite.y * tile;
+      const ex = sprite.x * tile + offsetX;
+      const ey = sprite.y * tile + offsetY;
       ctx.strokeStyle = 'rgba(255,80,80,0.9)';
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -168,7 +175,7 @@ export class Minimap {
         const wy = player.y + dy;
         if (positionCollides(wx, wy, PLAYER_RADIUS)) {
           ctx.fillStyle = 'rgba(255,0,128,0.35)';
-          ctx.fillRect(wx * tile - r2, wy * tile - r2, r2 * 2, r2 * 2);
+          ctx.fillRect(wx * tile + offsetX - r2, wy * tile + offsetY - r2, r2 * 2, r2 * 2);
         }
       }
     }
@@ -183,30 +190,28 @@ export class Minimap {
       ctx.strokeStyle = blocked ? '#f00' : '#0f0';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(player.x * tile, player.y * tile);
-      ctx.lineTo(tx * tile, ty * tile);
+      ctx.moveTo(centerX, centerY);
+      ctx.lineTo(tx * tile + offsetX, ty * tile + offsetY);
       ctx.stroke();
     }
 
     // Spieler-Kollisionskreis (am wichtigsten)
-    const ppx = player.x * tile;
-    const ppy = player.y * tile;
     ctx.strokeStyle = '#0f0';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(ppx, ppy, PLAYER_RADIUS * tile, 0, Math.PI * 2);
+    ctx.arc(centerX, centerY, PLAYER_RADIUS * tile, 0, Math.PI * 2);
     ctx.stroke();
 
     // Spielerzentrum + Blickrichtung
     ctx.fillStyle = '#0f0';
     ctx.beginPath();
-    ctx.arc(ppx, ppy, 4, 0, Math.PI * 2);
+    ctx.arc(centerX, centerY, 4, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = '#0a0';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(ppx, ppy);
-    ctx.lineTo(ppx + player.dirX * tile * 0.6, ppy + player.dirY * tile * 0.6);
+    ctx.moveTo(centerX, centerY);
+    ctx.lineTo(centerX + player.dirX * tile * 0.6, centerY + player.dirY * tile * 0.6);
     ctx.stroke();
 
     // HUD-Text mit Position
@@ -239,13 +244,15 @@ export class Minimap {
   private renderMap(
     ctx: CanvasRenderingContext2D,
     tileSize: number,
-    reachable?: boolean[][]
+    reachable?: boolean[][],
+    offsetX: number = 0,
+    offsetY: number = 0
   ): void {
     for (let y = 0; y < MAP_HEIGHT; y++) {
       for (let x = 0; x < MAP_WIDTH; x++) {
         const base = WORLD_MAP[y][x];
-        const px = x * tileSize;
-        const py = y * tileSize;
+        const px = x * tileSize + offsetX;
+        const py = y * tileSize + offsetY;
 
         // Türzustände berücksichtigen
         if (base === TILE.BLUE_KEY_DOOR || base === TILE.SECRET_WALL) {
@@ -327,10 +334,12 @@ export class Minimap {
     worldX: number,
     worldY: number,
     tileSize: number,
+    offsetX: number,
+    offsetY: number,
     color: string
   ): void {
-    const px = worldX * tileSize;
-    const py = worldY * tileSize;
+    const px = worldX * tileSize + offsetX;
+    const py = worldY * tileSize + offsetY;
 
     ctx.fillStyle = color;
     ctx.beginPath();
@@ -338,20 +347,23 @@ export class Minimap {
     ctx.fill();
   }
 
-  private renderPlayer(ctx: CanvasRenderingContext2D, player: Player, tileSize: number): void {
-    const px = player.x * tileSize;
-    const py = player.y * tileSize;
-
+  private renderPlayer(
+    ctx: CanvasRenderingContext2D,
+    player: Player,
+    tileSize: number,
+    centerX: number,
+    centerY: number
+  ): void {
     ctx.fillStyle = COLORS.player;
     ctx.beginPath();
-    ctx.arc(px, py, 4, 0, Math.PI * 2);
+    ctx.arc(centerX, centerY, 4, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.strokeStyle = COLORS.playerDir;
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(px, py);
-    ctx.lineTo(px + player.dirX * tileSize * 1.2, py + player.dirY * tileSize * 1.2);
+    ctx.moveTo(centerX, centerY);
+    ctx.lineTo(centerX + player.dirX * tileSize * 1.2, centerY + player.dirY * tileSize * 1.2);
     ctx.stroke();
   }
 }
