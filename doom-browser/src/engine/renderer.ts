@@ -9,6 +9,7 @@ import { GameState, GameStateManager } from '../game/state';
 import { Weapon, WeaponState } from '../game/weapon';
 import { WeaponInventory, WeaponType, WEAPONS } from '../game/weapons';
 import { RocketProjectile } from './rocket-projectile';
+import { BioProjectile } from './bio-projectile';
 import { slideAlongX, slideAlongY, PLAYER_RADIUS, ENEMY_RADIUS, MIN_ENTITY_DIST,
           resolveAllEntityOverlaps, wouldOverlapEntity, resolveEntityCollision,
           ROCKET_RADIUS, positionCollides, hasLineOfSight } from './collision';
@@ -102,6 +103,7 @@ export class Renderer {
 
   // Rocket projectiles
   private rockets: RocketProjectile[] = [];
+  private bioProjectiles: BioProjectile[] = [];
 
   // Edge-Triggering für Interaktion (E-Taste)
   private wasInteractPressedLastFrame: boolean = false;
@@ -917,6 +919,74 @@ export class Renderer {
             }
           }
         }
+      }
+    }
+  }
+
+  /**
+   * Render visual-only Spitter bio projectiles after the main sprite pass.
+   * Each projectile is drawn as a stack of three radial fills (halo + body
+   * + hot core) and depth-tested against the z-buffer at its screen column.
+   */
+  private renderBioProjectiles(): void {
+    if (this.bioProjectiles.length === 0) return;
+
+    const dirX = this.player.dirX;
+    const dirY = this.player.dirY;
+    const planeX = this.player.planeX;
+    const planeY = this.player.planeY;
+    const px = this.player.x;
+    const py = this.player.y;
+    const invDet = 1.0 / (planeX * dirY - dirX * planeY);
+
+    for (const proj of this.bioProjectiles) {
+      const spriteX = proj.x - px;
+      const spriteY = proj.y - py;
+      const transformX = invDet * (dirY * spriteX - dirX * spriteY);
+      const transformY = invDet * (-planeY * spriteX + planeX * spriteY);
+
+      if (transformY <= 0.1) continue;
+
+      const screenX = Math.floor((SCREEN_WIDTH / 2) * (1 + transformX / transformY));
+      if (screenX < 0 || screenX >= SCREEN_WIDTH) continue;
+
+      // Z-buffer test at the projectile's screen column — hides it behind walls.
+      if (this.zBuffer.get(screenX) < transformY) continue;
+
+      // Sprites use mid-screen as the horizontal axis; projectile sits slightly
+      // above mid-height to suggest emitter level.
+      const screenY = Math.floor(SCREEN_HEIGHT / 2 - 8 / transformY);
+      const baseRadius = Math.max(2, Math.min(28, 14 / transformY));
+
+      if (proj.isSplatting) {
+        const fade = proj.splatTimer / proj.splatDuration;
+        // Splat: bigger spread, fades alpha
+        this.ctx.fillStyle = `rgba(90, 102, 24, ${0.35 * fade})`;
+        this.ctx.beginPath();
+        this.ctx.arc(screenX, screenY, baseRadius * 2.4, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.fillStyle = `rgba(200, 224, 64, ${0.7 * fade})`;
+        this.ctx.beginPath();
+        this.ctx.arc(screenX, screenY, baseRadius * 1.2, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.fillStyle = `rgba(244, 255, 138, ${0.9 * fade})`;
+        this.ctx.beginPath();
+        this.ctx.arc(screenX, screenY, baseRadius * 0.5, 0, Math.PI * 2);
+        this.ctx.fill();
+      } else {
+        // In-flight glob: outer halo, bright body, hot core.
+        this.ctx.fillStyle = 'rgba(90, 102, 24, 0.35)';
+        this.ctx.beginPath();
+        this.ctx.arc(screenX, screenY, baseRadius * 1.7, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.fillStyle = 'rgba(200, 224, 64, 0.85)';
+        this.ctx.beginPath();
+        this.ctx.arc(screenX, screenY, baseRadius * 0.9, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.fillStyle = 'rgba(244, 255, 138, 1)';
+        this.ctx.beginPath();
+        this.ctx.arc(screenX, screenY, baseRadius * 0.4, 0, Math.PI * 2);
+        this.ctx.fill();
       }
     }
   }
@@ -2325,6 +2395,18 @@ export class Renderer {
         this.triggerDamageFlash();
         sprite.muzzleFlashTimer = 0.2;
         this.broadcastGunshot();
+
+        // Visual-only bio projectile from the emitter toward player.
+        // Spawned slightly in front of the Spitter so it doesn't pop out of
+        // the body silhouette. Lifetime covers the full shooter range plus
+        // a small buffer; positionCollides() ends it early on wall impact.
+        const ndx = dx / dist;
+        const ndy = dy / dist;
+        const emitX = sprite.x + ndx * 0.25;
+        const emitY = sprite.y + ndy * 0.25;
+        const projSpeed = 18;
+        const projLife = sprite.shooterRange / projSpeed + 0.05;
+        this.bioProjectiles.push(new BioProjectile(emitX, emitY, ndx, ndy, projSpeed, projLife));
       }
     }
     // No LOS in range — stay put, don't move
@@ -2500,6 +2582,13 @@ export class Renderer {
           }
         }
 
+        // Bio projectiles: advance + splat on hit/expiry; remove when done.
+        for (let i = this.bioProjectiles.length - 1; i >= 0; i--) {
+          if (this.bioProjectiles[i].update(deltaTime)) {
+            this.bioProjectiles.splice(i, 1);
+          }
+        }
+
         // Sprite-Animationen updaten + Hit/Death-Timer
         for (const sprite of this.sprites) {
           sprite.update(deltaTime);
@@ -2633,6 +2722,7 @@ export class Renderer {
         this.drawFloorAndCeiling();
         this.castRays();
         this.renderSprites();
+        this.renderBioProjectiles();
 
         // Weapon nur im Spiel rendern
         if (gameState === GameState.PLAYING || gameState === GameState.PAUSED) {
