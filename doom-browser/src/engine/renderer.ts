@@ -4,7 +4,7 @@ import { ZBuffer } from './zbuffer';
 import { InputHandler, pointerLockSupported } from '../player/input';
 import { TextureManager, Texture } from './textures';
 import { Sprite, SpriteType, generateSpriteTextures, EnemyAIState, EnemyClass, AI_IDLE_PATROL_RADIUS, AI_AWARENESS_RADIUS, AI_GUNSHOT_RADIUS, AI_ALERT_TO_CHASE_DELAY, AI_CHASE_TO_ALERT_DELAY, AI_SHOOTER_RANGE, AI_SHOOTER_MIN_DIST, AI_SHOOTER_COOLDOWN, AI_SHOOTER_DAMAGE, AI_SHOOTER_MOVE_SPEED } from './sprite';
-import { corpseTexture, SpriteTextureSet } from './sprite-textures';
+import { huskCorpseTexture, spitterCorpseTexture, SpriteTextureSet } from './sprite-textures';
 import { GameState, GameStateManager } from '../game/state';
 import { Weapon, WeaponState } from '../game/weapon';
 import { WeaponInventory, WeaponType, WEAPONS } from '../game/weapons';
@@ -534,10 +534,10 @@ export class Renderer {
     for (const pos of level.enemies) {
       const enemy = new Sprite(pos.x, pos.y, SpriteType.ENEMY, enemyTextures?.[0] ?? null);
       if (enemyTextures) enemy.textures = enemyTextures;
-      enemy.angleViews = spriteSet.enemyAngleViews;
+      enemy.angleViews = spriteSet.huskAngleViews;
       enemy.facingAngle = Math.atan2(this.player.y - pos.y, this.player.x - pos.x);
       enemy.animationSpeed = 0.4;
-      enemy.corpseTexture = corpseTexture;
+      enemy.corpseTexture = huskCorpseTexture;
       enemy.aiState = EnemyAIState.IDLE;
       enemy.alertTimer = 0;
       enemy.alertFadeoutTimer = 0;
@@ -551,13 +551,14 @@ export class Renderer {
     }
 
     // Shooter enemies
+    const spitterTextures = flat.get(SpriteType.SHOOTER);
     for (const pos of level.shooters) {
-      const shooter = new Sprite(pos.x, pos.y, SpriteType.SHOOTER, enemyTextures?.[0] ?? null);
-      if (enemyTextures) shooter.textures = enemyTextures;
-      shooter.angleViews = spriteSet.enemyAngleViews;
+      const shooter = new Sprite(pos.x, pos.y, SpriteType.SHOOTER, spitterTextures?.[0] ?? enemyTextures?.[0] ?? null);
+      if (spitterTextures) shooter.textures = spitterTextures; else if (enemyTextures) shooter.textures = enemyTextures;
+      shooter.angleViews = spriteSet.spitterAngleViews;
       shooter.facingAngle = Math.atan2(this.player.y - pos.y, this.player.x - pos.x);
       shooter.animationSpeed = 0.4;
-      shooter.corpseTexture = corpseTexture;
+      shooter.corpseTexture = spitterCorpseTexture;
       shooter.aiState = EnemyAIState.IDLE;
       shooter.alertTimer = 0;
       shooter.alertFadeoutTimer = 0;

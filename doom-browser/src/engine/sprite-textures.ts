@@ -9,28 +9,43 @@ type EnemyView = 'front' | 'frontQuarter' | 'side' | 'backQuarter' | 'back';
 /**
  * Result of generateSpriteTextures:
  * - flat: single-frame texture arrays per type (Items + Decor + Enemy fallback)
- * - enemyAngleViews: [poseIdx 0..2][angleIdx 0..7] for ENEMY 8-direction rendering
+ * - huskAngleViews: [poseIdx 0..2][angleIdx 0..7] for ENEMY (Grunt/Husk) 8-direction rendering
+ * - spitterAngleViews: [poseIdx 0..2][angleIdx 0..7] for SHOOTER (Spitter) 8-direction rendering
  */
 export interface SpriteTextureSet {
   flat: Map<SpriteType, Texture[]>;
-  enemyAngleViews: Texture[][];
+  huskAngleViews: Texture[][];
+  spitterAngleViews: Texture[][];
 }
 
-export const corpseTexture = generateCorpseTexture(SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+export const huskCorpseTexture = generateCorpseTexture(SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+
+export const spitterCorpseTexture = generateTintedCorpseTexture(SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+
+// @deprecated Use huskCorpseTexture directly. Kept for backward compat until Task 6.
+export const corpseTexture = huskCorpseTexture;
 
 export function generateSpriteTextures(): SpriteTextureSet {
   const flat = new Map<SpriteType, Texture[]>();
 
-  // Enemy: legacy frontal frames as fallback (idle/walk/attack)
+  // Husk (Grunt): legacy frontal frames as fallback (idle/walk/attack)
   flat.set(SpriteType.ENEMY, [
-    generateEnemyTexture('idle', 'front', false),
-    generateEnemyTexture('walk', 'front', false),
-    generateEnemyTexture('attack', 'front', false)
+    generateHuskTexture('idle', 'front', false),
+    generateHuskTexture('walk', 'front', false),
+    generateHuskTexture('attack', 'front', false)
   ]);
 
-  // Enemy: 8-direction angle views per pose
+  // Spitter (Shooter): frontal frames as fallback (idle/walk/attack)
+  flat.set(SpriteType.SHOOTER, [
+    generateSpitterTexture('idle', 'front', false),
+    generateSpitterTexture('walk', 'front', false),
+    generateSpitterTexture('attack', 'front', false)
+  ]);
+
+  // 8-direction angle views per pose for both enemy types
   const poses: EnemyPose[] = ['idle', 'walk', 'attack'];
-  const enemyAngleViews: Texture[][] = poses.map(pose => buildEnemyAngleViews(pose));
+  const huskAngleViews: Texture[][] = poses.map(pose => buildHuskAngleViews(pose));
+  const spitterAngleViews: Texture[][] = poses.map(pose => buildSpitterAngleViews(pose));
 
   // Rotating items: 8 frames each
   flat.set(SpriteType.AMMO, buildRotatingItemFrames(generateAmmoFront, generateAmmoBack));
@@ -48,29 +63,44 @@ export function generateSpriteTextures(): SpriteTextureSet {
    flat.set(SpriteType.LAMP, [generateLampTexture()]);
    flat.set(SpriteType.DEBRIS, [generateDebrisTexture()]);
 
-   return { flat, enemyAngleViews };
+   return { flat, huskAngleViews, spitterAngleViews };
 }
 
 /* ------------------------------------------------------------------ */
 /* Enemy 8-direction generation                                        */
 /* ------------------------------------------------------------------ */
 
-function buildEnemyAngleViews(pose: EnemyPose): Texture[] {
+function buildHuskAngleViews(pose: EnemyPose): Texture[] {
   // Indices: 0=front, 1=frontQuarter, 2=side, 3=backQuarter, 4=back,
   //          5=backQuarter mirrored, 6=side mirrored, 7=frontQuarter mirrored
   return [
-    generateEnemyTexture(pose, 'front', false),
-    generateEnemyTexture(pose, 'frontQuarter', false),
-    generateEnemyTexture(pose, 'side', false),
-    generateEnemyTexture(pose, 'backQuarter', false),
-    generateEnemyTexture(pose, 'back', false),
-    generateEnemyTexture(pose, 'backQuarter', true),
-    generateEnemyTexture(pose, 'side', true),
-    generateEnemyTexture(pose, 'frontQuarter', true)
+    generateHuskTexture(pose, 'front', false),
+    generateHuskTexture(pose, 'frontQuarter', false),
+    generateHuskTexture(pose, 'side', false),
+    generateHuskTexture(pose, 'backQuarter', false),
+    generateHuskTexture(pose, 'back', false),
+    generateHuskTexture(pose, 'backQuarter', true),
+    generateHuskTexture(pose, 'side', true),
+    generateHuskTexture(pose, 'frontQuarter', true)
   ];
 }
 
-function generateEnemyTexture(pose: EnemyPose, view: EnemyView, mirror: boolean): Texture {
+function buildSpitterAngleViews(pose: EnemyPose): Texture[] {
+  // Indices: 0=front, 1=frontQuarter, 2=side, 3=backQuarter, 4=back,
+  //          5=backQuarter mirrored, 6=side mirrored, 7=frontQuarter mirrored
+  return [
+    generateSpitterTexture(pose, 'front', false),
+    generateSpitterTexture(pose, 'frontQuarter', false),
+    generateSpitterTexture(pose, 'side', false),
+    generateSpitterTexture(pose, 'backQuarter', false),
+    generateSpitterTexture(pose, 'back', false),
+    generateSpitterTexture(pose, 'backQuarter', true),
+    generateSpitterTexture(pose, 'side', true),
+    generateSpitterTexture(pose, 'frontQuarter', true)
+  ];
+}
+
+function generateHuskTexture(pose: EnemyPose, view: EnemyView, mirror: boolean): Texture {
   const canvas = document.createElement('canvas');
   canvas.width = SPRITE_TEXTURE_SIZE;
   canvas.height = SPRITE_TEXTURE_SIZE;
@@ -104,6 +134,59 @@ function generateEnemyTexture(pose: EnemyPose, view: EnemyView, mirror: boolean)
   }
 
   applySpriteRimLight(ctx, view);
+
+  if (mirror) {
+    return mirrorTextureHorizontal(canvas);
+  }
+
+  return {
+    canvas,
+    width: SPRITE_TEXTURE_SIZE,
+    height: SPRITE_TEXTURE_SIZE,
+    data: ctx.getImageData(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE)
+  };
+}
+
+function generateSpitterTexture(pose: EnemyPose, view: EnemyView, mirror: boolean): Texture {
+  const canvas = document.createElement('canvas');
+  canvas.width = SPRITE_TEXTURE_SIZE;
+  canvas.height = SPRITE_TEXTURE_SIZE;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+
+  const cx = 32;
+  const attacking = pose === 'attack';
+  const walking = pose === 'walk';
+  const headY = attacking ? 12 : 13;
+  const torsoY = attacking ? 23 : 24;
+  const legKick = walking ? 2 : 0;
+  const armSwing = walking ? 3 : 0;
+
+  switch (view) {
+    case 'front':
+      drawEnemyFront(ctx, cx, headY, torsoY, attacking, legKick, armSwing);
+      break;
+    case 'frontQuarter':
+      drawEnemyQuarter(ctx, cx, headY, torsoY, attacking, legKick, armSwing, /*back*/ false);
+      break;
+    case 'side':
+      drawEnemySide(ctx, cx, headY, torsoY, attacking, legKick, armSwing);
+      break;
+    case 'backQuarter':
+      drawEnemyQuarter(ctx, cx, headY, torsoY, attacking, legKick, armSwing, /*back*/ true);
+      break;
+    case 'back':
+      drawEnemyBack(ctx, cx, headY, torsoY, attacking, legKick, armSwing);
+      break;
+  }
+
+  applySpriteRimLight(ctx, view);
+
+  // Violet tint layer over the base sprite
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.fillStyle = '#9966cc';
+  ctx.fillRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+  ctx.globalCompositeOperation = 'source-over';
 
   if (mirror) {
     return mirrorTextureHorizontal(canvas);
@@ -1755,6 +1838,96 @@ export function generateCorpseTexture(w: number, h: number): Texture {
   ctx.beginPath();
   ctx.ellipse(cx, cy + 5, 10, 12, 0, 0, Math.PI * 2);
   ctx.fill();
+
+  return texFromCanvas(canvas, ctx);
+}
+
+/* Spitter corpse — same as Husk but with violet multiply tint         */
+/* ------------------------------------------------------------------ */
+
+export function generateTintedCorpseTexture(w: number, h: number): Texture {
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, w, h);
+
+  const cx = w / 2;
+  const cy = h / 2;
+
+  // Blood pool — dark reddish-brown ellipse
+  ctx.fillStyle = 'rgba(60, 15, 10, 0.85)';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + 2, 24, 28, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Outer blood ring (darker, slightly larger)
+  ctx.strokeStyle = 'rgba(40, 10, 8, 0.4)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + 3, 26, 30, 0, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Body silhouette — elongated blob, head at top, legs at bottom
+  ctx.fillStyle = '#50140f';
+  ctx.beginPath();
+  // Head (rounded top)
+  ctx.arc(cx, cy - 10, 9, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Torso (widens from head)
+  ctx.beginPath();
+  ctx.moveTo(cx - 7, cy - 2);
+  ctx.quadraticCurveTo(cx - 14, cy + 4, cx - 13, cy + 10);
+  ctx.lineTo(cx + 13, cy + 10);
+  ctx.quadraticCurveTo(cx + 14, cy + 4, cx + 7, cy - 2);
+  ctx.fill();
+
+  // Arms — splayed out to sides
+  ctx.fillStyle = '#50140f';
+  ctx.beginPath();
+  ctx.moveTo(cx - 7, cy);
+  ctx.quadraticCurveTo(cx - 18, cy - 4, cx - 22, cy + 2);
+  ctx.quadraticCurveTo(cx - 24, cy + 6, cx - 18, cy + 8);
+  ctx.quadraticCurveTo(cx - 14, cy + 4, cx - 7, cy + 6);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(cx + 7, cy);
+  ctx.quadraticCurveTo(cx + 18, cy - 4, cx + 22, cy + 2);
+  ctx.quadraticCurveTo(cx + 24, cy + 6, cx + 18, cy + 8);
+  ctx.quadraticCurveTo(cx + 14, cy + 4, cx + 7, cy + 6);
+  ctx.fill();
+
+  // Legs — slightly separated, ending in feet
+  ctx.fillStyle = '#401008';
+  ctx.beginPath();
+  ctx.moveTo(cx - 6, cy + 10);
+  ctx.quadraticCurveTo(cx - 9, cy + 20, cx - 10, cy + 26);
+  ctx.quadraticCurveTo(cx - 12, cy + 30, cx - 6, cy + 32);
+  ctx.quadraticCurveTo(cx - 2, cy + 32, cx - 2, cy + 28);
+  ctx.quadraticCurveTo(cx - 3, cy + 22, cx - 3, cy + 10);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(cx + 3, cy + 10);
+  ctx.quadraticCurveTo(cx + 4, cy + 20, cx + 7, cy + 26);
+  ctx.quadraticCurveTo(cx + 9, cy + 30, cx + 13, cy + 28);
+  ctx.quadraticCurveTo(cx + 14, cy + 24, cx + 11, cy + 20);
+  ctx.quadraticCurveTo(cx + 9, cy + 14, cx + 7, cy + 10);
+  ctx.fill();
+
+  // Darker shading in center
+  ctx.fillStyle = 'rgba(40, 8, 5, 0.3)';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + 5, 10, 12, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Violet tint layer
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.fillStyle = '#9966cc';
+  ctx.fillRect(0, 0, w, h);
+  ctx.globalCompositeOperation = 'source-over';
 
   return texFromCanvas(canvas, ctx);
 }
