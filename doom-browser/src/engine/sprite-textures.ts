@@ -177,40 +177,22 @@ function generateSpitterTexture(pose: EnemyPose, view: EnemyView, mirror: boolea
   const ctx = canvas.getContext('2d')!;
   ctx.clearRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
 
-  const cx = 32;
-  const attacking = pose === 'attack';
-  const walking = pose === 'walk';
-  const headY = attacking ? 12 : 13;
-  const torsoY = attacking ? 23 : 24;
-  const legKick = walking ? 2 : 0;
-  const armSwing = walking ? 3 : 0;
-
   switch (view) {
     case 'front':
       drawSpitterFront(ctx, pose);
       break;
     case 'frontQuarter':
-      drawEnemyQuarter(ctx, cx, headY, torsoY, attacking, legKick, armSwing, /*back*/ false);
+      drawSpitterFrontQuarter(ctx, pose);
       break;
     case 'side':
-      drawEnemySide(ctx, cx, headY, torsoY, attacking, legKick, armSwing);
+      drawSpitterSide(ctx, pose);
       break;
     case 'backQuarter':
-      drawEnemyQuarter(ctx, cx, headY, torsoY, attacking, legKick, armSwing, /*back*/ true);
+      drawSpitterBackQuarter(ctx, pose);
       break;
     case 'back':
-      drawEnemyBack(ctx, cx, headY, torsoY, attacking, legKick, armSwing);
+      drawSpitterBack(ctx, pose);
       break;
-  }
-
-  if (view !== 'front') {
-    applySpriteRimLight(ctx, view);
-
-    // Violet tint layer over the base sprite
-    ctx.globalCompositeOperation = 'multiply';
-    ctx.fillStyle = '#9966cc';
-    ctx.fillRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
-    ctx.globalCompositeOperation = 'source-over';
   }
 
   if (mirror) {
@@ -261,49 +243,49 @@ function drawHuskShadow(ctx: CanvasRenderingContext2D): void {
   ctx.restore();
 }
 
-function drawHuskLegs(ctx: CanvasRenderingContext2D, pose: EnemyPose): void {
-  const cx = 32;
-
-  let leftThighX: number;
-  let rightThighX: number;
-  let leftShinX: number;
-  let rightShinX: number;
-  let leftClaw1X: number, leftClaw2X: number;
-  let rightClaw1X: number, rightClaw2X: number;
-
-  if (pose === 'attack') {
-    leftThighX = cx - 18;  rightThighX = cx + 14;
-    leftShinX  = cx - 22;  rightShinX  = cx + 18;
-    leftClaw1X = cx - 24;  leftClaw2X  = cx - 20;
-    rightClaw1X = cx + 20; rightClaw2X = cx + 24;
-  } else if (pose === 'walk') {
-    leftThighX = cx - 13;  rightThighX = cx + 11;
-    leftShinX  = cx - 15;  rightShinX  = cx + 14;
-    leftClaw1X = cx - 17;  leftClaw2X  = cx - 13;
-    rightClaw1X = cx + 14; rightClaw2X = cx + 18;
-  } else {
-    leftThighX = cx - 15;  rightThighX = cx + 11;
-    leftShinX  = cx - 18;  rightShinX  = cx + 14;
-    leftClaw1X = cx - 20;  leftClaw2X  = cx - 16;
-    rightClaw1X = cx + 14; rightClaw2X = cx + 18;
-  }
-
-  // Oberschenkel
-  ctx.fillStyle = HUSK_CARAPACE;
-  ctx.fillRect(leftThighX,  42, 4, 10);
-  ctx.fillRect(rightThighX, 42, 4, 10);
-
-  // Unterschenkel
-  ctx.fillStyle = HUSK_PLATE;
-  ctx.fillRect(leftShinX,  50, 4, 8);
-  ctx.fillRect(rightShinX, 50, 4, 8);
-
-  // Klauen (je 2 pro Bein)
-  ctx.fillStyle = HUSK_BLADE;
-  ctx.fillRect(leftClaw1X,  57, 3, 2);
-  ctx.fillRect(leftClaw2X,  57, 3, 2);
-  ctx.fillRect(rightClaw1X, 57, 3, 2);
-  ctx.fillRect(rightClaw2X, 57, 3, 2);
+function drawHuskLegs(ctx: CanvasRenderingContext2D, pose: EnemyPose): void {
+  const cx = 32;
+
+  let leftThighX: number;
+  let rightThighX: number;
+  let leftShinX: number;
+  let rightShinX: number;
+  let leftClaw1X: number, leftClaw2X: number;
+  let rightClaw1X: number, rightClaw2X: number;
+
+  if (pose === 'attack') {
+    leftThighX = cx - 18;  rightThighX = cx + 14;
+    leftShinX  = cx - 22;  rightShinX  = cx + 18;
+    leftClaw1X = cx - 24;  leftClaw2X  = cx - 20;
+    rightClaw1X = cx + 20; rightClaw2X = cx + 24;
+  } else if (pose === 'walk') {
+    leftThighX = cx - 13;  rightThighX = cx + 11;
+    leftShinX  = cx - 15;  rightShinX  = cx + 14;
+    leftClaw1X = cx - 17;  leftClaw2X  = cx - 13;
+    rightClaw1X = cx + 14; rightClaw2X = cx + 18;
+  } else {
+    leftThighX = cx - 15;  rightThighX = cx + 11;
+    leftShinX  = cx - 18;  rightShinX  = cx + 14;
+    leftClaw1X = cx - 20;  leftClaw2X  = cx - 16;
+    rightClaw1X = cx + 14; rightClaw2X = cx + 18;
+  }
+
+  // Oberschenkel
+  ctx.fillStyle = HUSK_CARAPACE;
+  ctx.fillRect(leftThighX,  42, 4, 10);
+  ctx.fillRect(rightThighX, 42, 4, 10);
+
+  // Unterschenkel
+  ctx.fillStyle = HUSK_PLATE;
+  ctx.fillRect(leftShinX,  50, 4, 8);
+  ctx.fillRect(rightShinX, 50, 4, 8);
+
+  // Klauen (je 2 pro Bein)
+  ctx.fillStyle = HUSK_BLADE;
+  ctx.fillRect(leftClaw1X,  57, 3, 2);
+  ctx.fillRect(leftClaw2X,  57, 3, 2);
+  ctx.fillRect(rightClaw1X, 57, 3, 2);
+  ctx.fillRect(rightClaw2X, 57, 3, 2);
 }
 
 function drawHuskBody(ctx: CanvasRenderingContext2D, pose: EnemyPose): void {
@@ -669,6 +651,539 @@ function drawSpitterEyeStalk(ctx: CanvasRenderingContext2D, pose: EnemyPose): vo
   ctx.fillStyle = SPITTER_EYE_IRIS;
   ctx.beginPath();
   ctx.arc(cx, irisY, 1, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/* ----- Spitter Quarter / Side / Back views ----- */
+
+function drawSpitterFrontQuarter(ctx: CanvasRenderingContext2D, pose: EnemyPose): void {
+  const cx = 32;
+  const sx = 0.85;
+  const off = 3;
+  const bodyCx = cx + off;
+  const attacking = pose === 'attack';
+  const walking = pose === 'walk';
+
+  // Shadow (asymmetric, shifted toward foreground/right)
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  ctx.fillStyle = SPITTER_SHADOW;
+  ctx.beginPath();
+  ctx.ellipse(cx + 2, 60, 12, 2, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // Tripod legs (back first, front last)
+  // Back-left leg
+  ctx.strokeStyle = SPITTER_LEG;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx - Math.round(10 * sx) + off, 36);
+  ctx.lineTo(cx - Math.round(12 * sx) + off, 58);
+  ctx.stroke();
+
+  // Back-right leg
+  ctx.beginPath();
+  ctx.moveTo(cx + Math.round(10 * sx) + off, 36);
+  ctx.lineTo(cx + Math.round(12 * sx) + off, 58);
+  ctx.stroke();
+
+  // Front-center leg (largest, in foreground)
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  if (walking) {
+    ctx.moveTo(cx + 3, 36);
+    ctx.lineTo(cx + 3, 57);
+  } else if (attacking) {
+    ctx.moveTo(cx + 3, 38);
+    ctx.lineTo(cx + 3, 59);
+  } else {
+    ctx.moveTo(cx + 3, 38);
+    ctx.lineTo(cx + 3, 59);
+  }
+  ctx.stroke();
+  ctx.lineWidth = 1;
+
+  // Thorax (compressed droplet, shifted right)
+  const top = attacking ? 11 : 12;
+  const bottom = attacking ? 37 : 36;
+  const midW = attacking ? Math.round(14 * sx) : Math.round(12 * sx);
+  const topW = attacking ? Math.round(6 * sx) : Math.round(5 * sx);
+  const bottomW = attacking ? Math.round(9 * sx) : Math.round(8 * sx);
+
+  ctx.fillStyle = SPITTER_FLESH;
+  ctx.beginPath();
+  ctx.moveTo(bodyCx, top);
+  ctx.quadraticCurveTo(bodyCx - midW, (top + 24) / 2, bodyCx - midW, 24);
+  ctx.quadraticCurveTo(bodyCx - midW, (24 + bottom) / 2, bodyCx - bottomW, bottom);
+  ctx.quadraticCurveTo(bodyCx, bottom + 2, bodyCx + bottomW, bottom);
+  ctx.quadraticCurveTo(bodyCx + midW, (bottom + 24) / 2, bodyCx + midW, 24);
+  ctx.quadraticCurveTo(bodyCx + midW, (24 + top) / 2, bodyCx + topW, top);
+  ctx.quadraticCurveTo(bodyCx, top - 2, bodyCx, top);
+  ctx.fill();
+
+  // Gradient overlay
+  const grad = ctx.createLinearGradient(bodyCx, top, bodyCx, bottom);
+  grad.addColorStop(0, SPITTER_FLESH_LIT);
+  grad.addColorStop(1, SPITTER_FLESH);
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(bodyCx, top);
+  ctx.quadraticCurveTo(bodyCx - midW, (top + 24) / 2, bodyCx - midW, 24);
+  ctx.quadraticCurveTo(bodyCx - midW, (24 + bottom) / 2, bodyCx - bottomW, bottom);
+  ctx.quadraticCurveTo(bodyCx, bottom + 2, bodyCx + bottomW, bottom);
+  ctx.quadraticCurveTo(bodyCx + midW, (bottom + 24) / 2, bodyCx + midW, 24);
+  ctx.quadraticCurveTo(bodyCx + midW, (24 + top) / 2, bodyCx + topW, top);
+  ctx.quadraticCurveTo(bodyCx, top - 2, bodyCx, top);
+  ctx.fill();
+
+  // Rim highlight (compressed, shifted right)
+  ctx.strokeStyle = SPITTER_FLESH_RIM;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(bodyCx + Math.round(8 * sx), 14);
+  ctx.lineTo(bodyCx + Math.round(12 * sx), 22);
+  ctx.stroke();
+  ctx.lineWidth = 1;
+
+  // Emitter arm (foreground/right, visible)
+  ctx.strokeStyle = SPITTER_FLESH;
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(bodyCx + Math.round(10 * sx), 28);
+  ctx.quadraticCurveTo(bodyCx + Math.round(14 * sx), 36, bodyCx + Math.round(16 * sx), 44);
+  ctx.stroke();
+
+  // Arm highlight
+  ctx.strokeStyle = SPITTER_FLESH_RIM;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(bodyCx + Math.round(8 * sx), 27);
+  ctx.quadraticCurveTo(bodyCx + Math.round(12 * sx), 35, bodyCx + Math.round(14 * sx), 43);
+  ctx.stroke();
+
+  // Orifice
+  if (attacking) {
+    ctx.shadowColor = SPITTER_BIO_HOT;
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = SPITTER_BIO_HOT;
+    ctx.beginPath();
+    ctx.arc(bodyCx + Math.round(16 * sx), 44, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  } else {
+    ctx.fillStyle = SPITTER_EMITTER;
+    ctx.beginPath();
+    ctx.arc(bodyCx + Math.round(16 * sx), 44, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = SPITTER_BIO;
+    ctx.beginPath();
+    ctx.arc(bodyCx + Math.round(16 * sx), 44, 1, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Eye stalk
+  ctx.strokeStyle = SPITTER_FLESH_LIT;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(bodyCx, 4);
+  ctx.lineTo(bodyCx, 12);
+  ctx.stroke();
+  ctx.lineWidth = 1;
+
+  // Iris Y from pose
+  let irisY: number;
+  if (walking) {
+    irisY = 5;
+  } else if (attacking) {
+    irisY = 6;
+  } else {
+    irisY = 4;
+  }
+
+  // Sclera
+  let scleraR = attacking ? 3 : 2.5;
+  ctx.fillStyle = SPITTER_EYE_WHITE;
+  ctx.beginPath();
+  ctx.arc(bodyCx, 4, scleraR, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Iris (offset slightly toward foreground = +1 px right)
+  ctx.fillStyle = SPITTER_EYE_IRIS;
+  ctx.beginPath();
+  ctx.arc(bodyCx + 1, irisY, 1, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawSpitterSide(ctx: CanvasRenderingContext2D, pose: EnemyPose): void {
+  const cx = 32;
+  const attacking = pose === 'attack';
+  const walking = pose === 'walk';
+
+  // Shadow (narrower)
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  ctx.fillStyle = SPITTER_SHADOW;
+  ctx.beginPath();
+  ctx.ellipse(cx + 1, 60, 10, 1.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // Legs (profile: front-center + 1 visible back + 1 hidden hint)
+  // Hidden back leg (1px thin line)
+  ctx.strokeStyle = SPITTER_LEG;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cx - 6, 36);
+  ctx.lineTo(cx - 6, 58);
+  ctx.stroke();
+
+  // Visible back leg
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx - 4, 36);
+  ctx.lineTo(cx - 6, 58);
+  ctx.stroke();
+
+  // Front-center leg
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  if (walking) {
+    ctx.moveTo(cx, 36);
+    ctx.lineTo(cx, 57);
+  } else if (attacking) {
+    ctx.moveTo(cx, 38);
+    ctx.lineTo(cx, 59);
+  } else {
+    ctx.moveTo(cx, 38);
+    ctx.lineTo(cx, 59);
+  }
+  ctx.stroke();
+  ctx.lineWidth = 1;
+
+  // Thorax (narrow profile ~14px wide)
+  const top = attacking ? 11 : 12;
+  const bottom = attacking ? 37 : 36;
+  const midW = attacking ? 7 : 7;
+  const topW = attacking ? 4 : 3;
+  const bottomW = attacking ? 5 : 5;
+
+  ctx.fillStyle = SPITTER_FLESH;
+  ctx.beginPath();
+  ctx.moveTo(cx, top);
+  ctx.quadraticCurveTo(cx - midW, (top + 24) / 2, cx - midW, 24);
+  ctx.quadraticCurveTo(cx - midW, (24 + bottom) / 2, cx - bottomW, bottom);
+  ctx.quadraticCurveTo(cx, bottom + 2, cx + bottomW, bottom);
+  ctx.quadraticCurveTo(cx + midW, (bottom + 24) / 2, cx + midW, 24);
+  ctx.quadraticCurveTo(cx + midW, (24 + top) / 2, cx + topW, top);
+  ctx.quadraticCurveTo(cx, top - 2, cx, top);
+  ctx.fill();
+
+  // Gradient overlay
+  const grad = ctx.createLinearGradient(cx, top, cx, bottom);
+  grad.addColorStop(0, SPITTER_FLESH_LIT);
+  grad.addColorStop(1, SPITTER_FLESH);
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(cx, top);
+  ctx.quadraticCurveTo(cx - midW, (top + 24) / 2, cx - midW, 24);
+  ctx.quadraticCurveTo(cx - midW, (24 + bottom) / 2, cx - bottomW, bottom);
+  ctx.quadraticCurveTo(cx, bottom + 2, cx + bottomW, bottom);
+  ctx.quadraticCurveTo(cx + midW, (bottom + 24) / 2, cx + midW, 24);
+  ctx.quadraticCurveTo(cx + midW, (24 + top) / 2, cx + topW, top);
+  ctx.quadraticCurveTo(cx, top - 2, cx, top);
+  ctx.fill();
+
+  // Rim highlight
+  ctx.strokeStyle = SPITTER_FLESH_RIM;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx + 5, 14);
+  ctx.lineTo(cx + 7, 22);
+  ctx.stroke();
+  ctx.lineWidth = 1;
+
+  // Emitter arm (points FORWARD in movement direction = right)
+  ctx.strokeStyle = SPITTER_FLESH;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(cx + 3, 28);
+  ctx.quadraticCurveTo(cx + 10, 32, cx + 14, 36);
+  ctx.stroke();
+
+  // Orifice
+  if (attacking) {
+    ctx.shadowColor = SPITTER_BIO_HOT;
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = SPITTER_BIO_HOT;
+    ctx.beginPath();
+    ctx.arc(cx + 14, 36, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  } else {
+    ctx.fillStyle = SPITTER_EMITTER;
+    ctx.beginPath();
+    ctx.arc(cx + 14, 36, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = SPITTER_BIO;
+    ctx.beginPath();
+    ctx.arc(cx + 14, 36, 1, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Eye stalk
+  ctx.strokeStyle = SPITTER_FLESH_LIT;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx, 4);
+  ctx.lineTo(cx, 12);
+  ctx.stroke();
+  ctx.lineWidth = 1;
+
+  // Iris Y from pose
+  let irisY: number;
+  if (walking) {
+    irisY = 5;
+  } else if (attacking) {
+    irisY = 6;
+  } else {
+    irisY = 4;
+  }
+
+  // Sclera (at top of stalk)
+  let scleraR = attacking ? 3 : 2.5;
+  ctx.fillStyle = SPITTER_EYE_WHITE;
+  ctx.beginPath();
+  ctx.arc(cx, 4, scleraR, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Iris (turned toward side = +1 px toward movement direction)
+  ctx.fillStyle = SPITTER_EYE_IRIS;
+  ctx.beginPath();
+  ctx.arc(cx + 1, irisY, 1, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawSpitterBackQuarter(ctx: CanvasRenderingContext2D, pose: EnemyPose): void {
+  const cx = 32;
+  const sx = 0.85;
+  const off = 3;
+  const bodyCx = cx + off;
+  const attacking = pose === 'attack';
+  const walking = pose === 'walk';
+
+  // Shadow (asymmetric, shifted right)
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  ctx.fillStyle = SPITTER_SHADOW;
+  ctx.beginPath();
+  ctx.ellipse(cx + 2, 60, 12, 2, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // Tripod legs (no outer highlights — back is darker)
+  // Back-left leg
+  ctx.strokeStyle = SPITTER_LEG;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx - Math.round(10 * sx) + off, 36);
+  ctx.lineTo(cx - Math.round(12 * sx) + off, 58);
+  ctx.stroke();
+
+  // Back-right leg
+  ctx.beginPath();
+  ctx.moveTo(cx + Math.round(10 * sx) + off, 36);
+  ctx.lineTo(cx + Math.round(12 * sx) + off, 58);
+  ctx.stroke();
+
+  // Front-center leg
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  if (walking) {
+    ctx.moveTo(cx + 3, 36);
+    ctx.lineTo(cx + 3, 57);
+  } else if (attacking) {
+    ctx.moveTo(cx + 3, 38);
+    ctx.lineTo(cx + 3, 59);
+  } else {
+    ctx.moveTo(cx + 3, 38);
+    ctx.lineTo(cx + 3, 59);
+  }
+  ctx.stroke();
+  ctx.lineWidth = 1;
+
+  // Thorax back (same compressed droplet shape, no rim highlight)
+  const top = attacking ? 11 : 12;
+  const bottom = attacking ? 37 : 36;
+  const midW = attacking ? Math.round(14 * sx) : Math.round(12 * sx);
+  const topW = attacking ? Math.round(6 * sx) : Math.round(5 * sx);
+  const bottomW = attacking ? Math.round(9 * sx) : Math.round(8 * sx);
+
+  ctx.fillStyle = SPITTER_FLESH;
+  ctx.beginPath();
+  ctx.moveTo(bodyCx, top);
+  ctx.quadraticCurveTo(bodyCx - midW, (top + 24) / 2, bodyCx - midW, 24);
+  ctx.quadraticCurveTo(bodyCx - midW, (24 + bottom) / 2, bodyCx - bottomW, bottom);
+  ctx.quadraticCurveTo(bodyCx, bottom + 2, bodyCx + bottomW, bottom);
+  ctx.quadraticCurveTo(bodyCx + midW, (bottom + 24) / 2, bodyCx + midW, 24);
+  ctx.quadraticCurveTo(bodyCx + midW, (24 + top) / 2, bodyCx + topW, top);
+  ctx.quadraticCurveTo(bodyCx, top - 2, bodyCx, top);
+  ctx.fill();
+
+  // Gradient overlay (flesh_lit base, darker on back)
+  const grad = ctx.createLinearGradient(bodyCx, top, bodyCx, bottom);
+  grad.addColorStop(0, SPITTER_FLESH_LIT);
+  grad.addColorStop(1, SPITTER_FLESH);
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(bodyCx, top);
+  ctx.quadraticCurveTo(bodyCx - midW, (top + 24) / 2, bodyCx - midW, 24);
+  ctx.quadraticCurveTo(bodyCx - midW, (24 + bottom) / 2, bodyCx - bottomW, bottom);
+  ctx.quadraticCurveTo(bodyCx, bottom + 2, bodyCx + bottomW, bottom);
+  ctx.quadraticCurveTo(bodyCx + midW, (bottom + 24) / 2, bodyCx + midW, 24);
+  ctx.quadraticCurveTo(bodyCx + midW, (24 + top) / 2, bodyCx + topW, top);
+  ctx.quadraticCurveTo(bodyCx, top - 2, bodyCx, top);
+  ctx.fill();
+
+  // 3 vertical sucking lines (darker on lighter base = SPITTER_FLESH on SPITTER_FLESH_LIT gradient)
+  ctx.fillStyle = SPITTER_FLESH;
+  ctx.fillRect(bodyCx - Math.round(5 * sx), 18, 1, 14);
+  ctx.fillRect(bodyCx, 18, 1, 14);
+  ctx.fillRect(bodyCx + Math.round(5 * sx), 18, 1, 14);
+
+  // Emitter arm stump (short, no glow, no orifice)
+  ctx.strokeStyle = SPITTER_FLESH;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(bodyCx + Math.round(10 * sx), 28);
+  ctx.lineTo(bodyCx + Math.round(14 * sx), 34);
+  ctx.stroke();
+  ctx.lineWidth = 1;
+
+  // Eye stalk (stalk + sclera only, no iris — looking away)
+  ctx.strokeStyle = SPITTER_FLESH_LIT;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(bodyCx, 4);
+  ctx.lineTo(bodyCx, 12);
+  ctx.stroke();
+  ctx.lineWidth = 1;
+
+  // Sclera (smaller, back of eye, uniformly light)
+  ctx.fillStyle = SPITTER_EYE_WHITE;
+  ctx.beginPath();
+  ctx.arc(bodyCx, 4, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawSpitterBack(ctx: CanvasRenderingContext2D, pose: EnemyPose): void {
+  const cx = 32;
+  const attacking = pose === 'attack';
+  const walking = pose === 'walk';
+
+  // Shadow (symmetric)
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  ctx.fillStyle = SPITTER_SHADOW;
+  ctx.beginPath();
+  ctx.ellipse(cx, 60, 14, 2, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // Tripod legs (full width, symmetric, no outer highlights)
+  let blHipX: number, blFootX: number;
+  let brHipX: number, brFootX: number;
+  let fcHipY: number, fcFootY: number;
+
+  if (walking) {
+    blHipX = cx - 10; blFootX = cx - 12;
+    brHipX = cx + 10; brFootX = cx + 12;
+    fcHipY = 36; fcFootY = 57;
+  } else if (attacking) {
+    blHipX = cx - 10; blFootX = cx - 12;
+    brHipX = cx + 10; brFootX = cx + 12;
+    fcHipY = 38; fcFootY = 59;
+  } else {
+    blHipX = cx - 10; blFootX = cx - 12;
+    brHipX = cx + 10; brFootX = cx + 12;
+    fcHipY = 38; fcFootY = 59;
+  }
+
+  // Back legs first
+  ctx.strokeStyle = SPITTER_LEG;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(blHipX, 36);
+  ctx.lineTo(blFootX, 58);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(brHipX, 36);
+  ctx.lineTo(brFootX, 58);
+  ctx.stroke();
+
+  // Front-center leg
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(cx, fcHipY);
+  ctx.lineTo(cx, fcFootY);
+  ctx.stroke();
+  ctx.lineWidth = 1;
+
+  // Thorax back (full width, no rim highlight)
+  const top = attacking ? 11 : 12;
+  const bottom = attacking ? 37 : 36;
+  const midW = attacking ? 15 : 14;
+  const topW = attacking ? 7 : 6;
+  const bottomW = attacking ? 10 : 9;
+
+  ctx.fillStyle = SPITTER_FLESH;
+  ctx.beginPath();
+  ctx.moveTo(cx, top);
+  ctx.quadraticCurveTo(cx - midW, (top + 24) / 2, cx - midW, 24);
+  ctx.quadraticCurveTo(cx - midW, (24 + bottom) / 2, cx - bottomW, bottom);
+  ctx.quadraticCurveTo(cx, bottom + 2, cx + bottomW, bottom);
+  ctx.quadraticCurveTo(cx + midW, (bottom + 24) / 2, cx + midW, 24);
+  ctx.quadraticCurveTo(cx + midW, (24 + top) / 2, cx + topW, top);
+  ctx.quadraticCurveTo(cx, top - 2, cx, top);
+  ctx.fill();
+
+  // Gradient overlay
+  const grad = ctx.createLinearGradient(cx, top, cx, bottom);
+  grad.addColorStop(0, SPITTER_FLESH_LIT);
+  grad.addColorStop(1, SPITTER_FLESH);
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(cx, top);
+  ctx.quadraticCurveTo(cx - midW, (top + 24) / 2, cx - midW, 24);
+  ctx.quadraticCurveTo(cx - midW, (24 + bottom) / 2, cx - bottomW, bottom);
+  ctx.quadraticCurveTo(cx, bottom + 2, cx + bottomW, bottom);
+  ctx.quadraticCurveTo(cx + midW, (bottom + 24) / 2, cx + midW, 24);
+  ctx.quadraticCurveTo(cx + midW, (24 + top) / 2, cx + topW, top);
+  ctx.quadraticCurveTo(cx, top - 2, cx, top);
+  ctx.fill();
+
+  // 3 vertical sucking lines (centered)
+  ctx.fillStyle = SPITTER_FLESH;
+  ctx.fillRect(cx - 5, 18, 1, 14);
+  ctx.fillRect(cx, 18, 1, 14);
+  ctx.fillRect(cx + 5, 18, 1, 14);
+
+  // No emitter arm (hidden behind body from right rear)
+
+  // Eye stalk (stalk + sclera only, no iris)
+  ctx.strokeStyle = SPITTER_FLESH_LIT;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx, 4);
+  ctx.lineTo(cx, 12);
+  ctx.stroke();
+  ctx.lineWidth = 1;
+
+  // Sclera (small, top partially obscured by body)
+  ctx.fillStyle = SPITTER_EYE_WHITE;
+  ctx.beginPath();
+  ctx.arc(cx, 4, 2, 0, Math.PI * 2);
   ctx.fill();
 }
 
