@@ -5,6 +5,7 @@ import { InputHandler, pointerLockSupported } from '../player/input';
 import { TextureManager, Texture } from './textures';
 import { Sprite, SpriteType, generateSpriteTextures, EnemyAIState, EnemyClass, AI_IDLE_PATROL_RADIUS, AI_SHOOTER_RANGE, AI_SHOOTER_MIN_DIST, AI_SHOOTER_COOLDOWN, AI_SHOOTER_DAMAGE, LatcherState } from './sprite';
 import { updateEnemyAI, broadcastGunshot, type AIContext } from './enemy-ai';
+import { handlePlayerShoot, updateRockets, updateBioProjectiles, type CombatContext } from './combat';
 import { huskCorpseTexture, spitterCorpseTexture, SpriteTextureSet } from './sprite-textures';
 import { GameState, GameStateManager } from '../game/state';
 import { Weapon, WeaponState } from '../game/weapon';
@@ -12,7 +13,7 @@ import { WeaponInventory, WeaponType, WEAPONS } from '../game/weapons';
 import { RocketProjectile } from './rocket-projectile';
 import { BioProjectile } from './bio-projectile';
 import { BloodParticle } from './blood-particle';
-import { ENEMY_RADIUS, ROCKET_RADIUS, positionCollides } from './collision';
+import { ENEMY_RADIUS } from './collision';
 import { Minimap } from '../game/minimap';
 import { SoundManager, SoundType } from '../audio/sound';
 import { Level, generateLevel } from './level-gen';
@@ -193,7 +194,7 @@ export class Renderer {
     // Mouse-Click → Schießen + Sound initialisieren (erster User-Interaktion)
     this.canvas.addEventListener('mousedown', (e: MouseEvent) => {
       if (e.button === 0 && this.gameStateManager.getState() === GameState.PLAYING) {
-        this.handleShoot();
+        handlePlayerShoot(this.combatCtx());
       }
       // Sound beim ersten Klick initialisieren (Browser-Policy)
       this.soundManager.init();
@@ -261,188 +262,6 @@ export class Renderer {
   }
 
   /**
-   * Handelt einen Schuss: feuert Waffe, prüft Hit auf Gegner-Sprites.
-   */
-  private handleShoot(): void {
-    if (!this.inventory.fire()) return;
-
-    const def = this.inventory.getCurrent();
-
-    // Set per-weapon animation state on Weapon
-    this.weapon.triggerFire(
-      def.flashDuration,
-      def.recoilY,
-      def.recoilXSpread
-    );
-
-    // Fire sound per weapon
-    if (def.type === WeaponType.ROCKET_LAUNCHER) {
-      this.soundManager.play(SoundType.ROCKET_SHOOT);
-    } else {
-      this.soundManager.play(SoundType.SHOOT);
-    }
-
-    // Screen Shake: kurz leicht wackeln beim Schuss
-    this.screenShakeTimer = 0.08;
-    this.screenShakeIntensity = def.screenShake;
-
-    if (def.isProjectile) {
-      // Rocket: spawn projectile
-      const rocketSpeed = def.projectileSpeed || 12;
-      const rocket = new RocketProjectile(
-        this.player.x, this.player.y, 0.3,
-        this.player.dirX, this.player.dirY,
-        rocketSpeed, 4,
-        def.explosionRadius ?? 1.5,
-        def.explosionDamage ?? 10
-      );
-      this.rockets.push(rocket);
-      broadcastGunshot(this.aiCtx());
-      return;
-    }
-
-    // Hitscan weapons: raycast in player direction
-    const hit = this.checkShotHit();
-    if (hit) {
-      hit.health -= def.damage;
-
-      hit.hitFlashTimer = 0.12;
-
-      this.screenShakeTimer = 0.12;
-      this.screenShakeIntensity = def.screenShake + 2;
-
-      this.hitMarkerTimer = this.hitMarkerDuration;
-
-      this.soundManager.play(SoundType.HIT);
-
-      if (hit.health <= 0) {
-        if (hit.angleViews.length > 0) {
-          const px = this.player.x;
-          const py = this.player.y;
-          const angleToCamera = Math.atan2(py - hit.y, px - hit.x);
-          const rel = angleToCamera - hit.facingAngle;
-          const norm = ((rel % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-          const angleIdx = Math.floor((norm + Math.PI / 8) / (Math.PI / 4)) % 8;
-          const poseIdx = Math.min(hit.currentFrame, hit.angleViews.length - 1);
-          const frozen = hit.angleViews[poseIdx]?.[angleIdx];
-          if (frozen) hit.texture = frozen;
-        }
-
-        hit.isAlive = false;
-        hit.isDying = true;
-        hit.deathTimer = hit.deathDuration;
-        this.inventory.kills++;
-        this.player.score += 100;
-
-        this.soundManager.play(SoundType.ENEMY_DEATH);
-      }
-    } else {
-      this.triggerWallImpact();
-    }
-    broadcastGunshot(this.aiCtx());
-  }
-
-  /**
-   * Berechnet die screen-space Position des Wand-Einschlags (in Blickrichtung).
-   */
-  private triggerWallImpact(): void {
-    // Ray in Blickrichtung casten um Wand-Trefferpunkt zu finden
-    const rayDirX = this.player.dirX;
-    const rayDirY = this.player.dirY;
-
-    let mapX = Math.floor(this.player.x);
-    let mapY = Math.floor(this.player.y);
-    const deltaDistX = Math.abs(1 / rayDirX);
-    const deltaDistY = Math.abs(1 / rayDirY);
-
-    let sideDistX: number, sideDistY: number;
-    if (rayDirX < 0) {
-      sideDistX = (this.player.x - mapX) * deltaDistX;
-    } else {
-      sideDistX = (mapX + 1.0 - this.player.x) * deltaDistX;
-    }
-    if (rayDirY < 0) {
-      sideDistY = (this.player.y - mapY) * deltaDistY;
-    } else {
-      sideDistY = (mapY + 1.0 - this.player.y) * deltaDistY;
-    }
-
-    let hit = 0;
-    let steps = 0;
-    const maxSteps = 50;
-    while (hit === 0 && steps < maxSteps) {
-      steps++;
-      if (sideDistX < sideDistY) {
-        sideDistX += deltaDistX;
-        mapX += (rayDirX < 0 ? -1 : 1);
-      } else {
-        sideDistY += deltaDistY;
-        mapY += (rayDirY < 0 ? -1 : 1);
-      }
-      if (mapX < 0 || mapX >= MAP_WIDTH || mapY < 0 || mapY >= MAP_HEIGHT) {
-        hit = 1;
-      } else if (worldState.isSolidTile(mapX, mapY)) {
-        hit = worldState.getTile(mapX, mapY);
-      }
-    }
-
-    // Wand-Trefferpunkt berechnen
-    let wallX: number;
-    if (rayDirX < 0) {
-      wallX = this.player.y + sideDistX * rayDirY;
-    } else {
-      wallX = this.player.x + sideDistY * rayDirX;
-    }
-
-    // Screen-space Position (Mitte des Bildschirms mit leichtem Offset basierend auf Trefferpunkt)
-    const hitOffset = (wallX - Math.floor(wallX) - 0.5) * 100;
-    this.wallImpactX = SCREEN_WIDTH / 2 + hitOffset + (Math.random() - 0.5) * 20;
-    this.wallImpactY = SCREEN_HEIGHT / 2 + (Math.random() - 0.5) * 30;
-    this.wallImpactTimer = this.wallImpactDuration;
-  }
-
-  /**
-   * Prüft ob ein Schuss (in Blickrichtung) einen Gegner-Sprite trifft.
-   * Gibt den getroffenen Sprite zurück oder null.
-   */
-  private checkShotHit(): Sprite | null {
-    const px = this.player.x;
-    const py = this.player.y;
-    const dirX = this.player.dirX;
-    const dirY = this.player.dirY;
-
-    let closestSprite: Sprite | null = null;
-    let closestDist = Infinity;
-
-    for (const sprite of this.sprites) {
-      if (!sprite.isEnemy) continue;
-      if (sprite.isDying || sprite.isDead) continue;
-
-      // Vektor vom Spieler zum Sprite
-      const toSpriteX = sprite.x - px;
-      const toSpriteY = sprite.y - py;
-      const dist = Math.sqrt(toSpriteX * toSpriteX + toSpriteY * toSpriteY);
-
-      // Projektion des Sprite-Vektors auf die Blickrichtung (Dot Product)
-      const dot = toSpriteX * dirX + toSpriteY * dirY;
-      if (dot < 0) continue; // Sprite ist hinter dem Spieler
-
-      // Abstand der Sprite-Mitte zur Blicklinie
-      const projX = px + dirX * dot;
-      const projY = py + dirY * dot;
-      const offset = Math.sqrt((sprite.x - projX) ** 2 + (sprite.y - projY) ** 2);
-
-      // Treffer wenn nah genug an der Blicklinie (Sprite-Radius ~0.4 Tiles)
-      if (offset < 0.4 && dist < closestDist) {
-        closestDist = dist;
-        closestSprite = sprite;
-      }
-    }
-
-    return closestSprite;
-  }
-
-  /**
    * Prüft ob der Spieler nah genug an einem collectable Sprite ist zum Einsammeln.
    * Nur AMMO, HEALTH und KEYCARD sind einsammelbar. Deko (BARREL, TERMINAL, LAMP, DEBRIS)
    * wird ignoriert.
@@ -499,6 +318,35 @@ export class Renderer {
       sprites: this.sprites,
       bioProjectiles: this.bioProjectiles,
       triggerDamageFlash: () => this.triggerDamageFlash(),
+    };
+  }
+
+  private combatCtx(): CombatContext {
+    return {
+      player: this.player,
+      inventory: this.inventory,
+      weapon: this.weapon,
+      sprites: this.sprites,
+      rockets: this.rockets,
+      bioProjectiles: this.bioProjectiles,
+      soundManager: this.soundManager,
+      triggerDamageFlash: () => this.triggerDamageFlash(),
+      broadcastGunshot: () => broadcastGunshot(this.aiCtx()),
+      triggerScreenShake: (intensity, duration) => {
+        this.screenShakeTimer = duration;
+        this.screenShakeIntensity = intensity;
+      },
+      setWallImpact: (x, y) => {
+        this.wallImpactX = x;
+        this.wallImpactY = y;
+        this.wallImpactTimer = this.wallImpactDuration;
+      },
+      setHitMarker: () => {
+        this.hitMarkerTimer = this.hitMarkerDuration;
+      },
+      flashCameraNoSound: () => {
+        this.damageFlashTimer = this.damageFlashDuration;
+      },
     };
   }
 
@@ -2502,50 +2350,10 @@ export class Renderer {
         this.inventory.update(deltaTime);
 
         // Rocket projectiles: update, check expiry/wall collisions, check enemy hits
-        for (let i = this.rockets.length - 1; i >= 0; i--) {
-          const r = this.rockets[i];
-          r.update(deltaTime);
-          if (r.isExpired() || positionCollides(r.x, r.y, ROCKET_RADIUS)) {
-            const result = r.explode(this.sprites.filter(s => (s.isEnemy) && s.isAlive && !s.isDying && !s.isDead));
-            this.screenShakeTimer = 0.2;
-            this.screenShakeIntensity = 12;
-            this.damageFlashTimer = this.damageFlashDuration;
-            this.soundManager.play(SoundType.ROCKET_EXPLOSION);
-            this.rockets.splice(i, 1);
-            for (let k = 0; k < result.killed; k++) {
-              this.inventory.kills++;
-              this.player.score += 100;
-              this.soundManager.play(SoundType.ENEMY_DEATH);
-            }
-            continue;
-          }
-          // Check direct enemy hit
-          for (const sprite of this.sprites) {
-            if ((sprite.isEnemy) && sprite.isAlive && !sprite.isDying && !sprite.isDead) {
-              if (r.checkHit(sprite)) {
-                const result = r.explode(this.sprites.filter(s => (s.isEnemy) && s.isAlive && !s.isDying && !s.isDead));
-                this.screenShakeTimer = 0.2;
-                this.screenShakeIntensity = 12;
-                this.damageFlashTimer = this.damageFlashDuration;
-                this.soundManager.play(SoundType.ROCKET_EXPLOSION);
-                this.rockets.splice(i, 1);
-                for (let k = 0; k < result.killed; k++) {
-                  this.inventory.kills++;
-                  this.player.score += 100;
-                  this.soundManager.play(SoundType.ENEMY_DEATH);
-                }
-                break;
-              }
-            }
-          }
-        }
+        updateRockets(this.combatCtx(), deltaTime);
 
         // Bio projectiles: advance + splat on hit/expiry; remove when done.
-        for (let i = this.bioProjectiles.length - 1; i >= 0; i--) {
-          if (this.bioProjectiles[i].update(deltaTime)) {
-            this.bioProjectiles.splice(i, 1);
-          }
-        }
+        updateBioProjectiles(this.combatCtx(), deltaTime);
 
         // Sprite-Animationen updaten + Hit/Death-Timer
         for (const sprite of this.sprites) {
