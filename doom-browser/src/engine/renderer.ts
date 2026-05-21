@@ -10,6 +10,7 @@ import { Weapon, WeaponState } from '../game/weapon';
 import { WeaponInventory, WeaponType, WEAPONS } from '../game/weapons';
 import { RocketProjectile } from './rocket-projectile';
 import { BioProjectile } from './bio-projectile';
+import { BloodParticle } from './blood-particle';
 import { slideAlongX, slideAlongY, PLAYER_RADIUS, ENEMY_RADIUS, MIN_ENTITY_DIST,
           resolveAllEntityOverlaps, wouldOverlapEntity, resolveEntityCollision,
           ROCKET_RADIUS, positionCollides, hasLineOfSight } from './collision';
@@ -104,6 +105,7 @@ export class Renderer {
   // Rocket projectiles
   private rockets: RocketProjectile[] = [];
   private bioProjectiles: BioProjectile[] = [];
+  private bloodParticles: BloodParticle[] = [];
 
   // Edge-Triggering für Interaktion (E-Taste)
   private wasInteractPressedLastFrame: boolean = false;
@@ -941,6 +943,143 @@ export class Renderer {
               this.ctx.fillRect(stripe, y, 1, 1);
             }
           }
+        }
+      }
+    }
+  }
+
+  /**
+   * Spawn a burst of blood/gore droplets from a sprite that just transitioned
+   * into the dying state. Color is class-specific: cyan-teal for the Husk
+   * (chitin ichor), bio-green for the Spitter, dark red as fallback.
+   */
+  private spawnBloodAt(sprite: Sprite): void {
+    let color: string;
+    if (sprite.type === SpriteType.ENEMY) {
+      color = '173e4a';        // HUSK_PLATE
+    } else if (sprite.type === SpriteType.SHOOTER) {
+      color = 'c8e040';        // SPITTER_BIO
+    } else {
+      color = '7a0a0a';        // generic red
+    }
+
+    const count = 14;
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 0.8 + Math.random() * 1.6;
+      const vx = Math.cos(angle) * speed;
+      const vy = Math.sin(angle) * speed;
+      // Initial upward kick + variance — droplets arc above and fall back.
+      const vz = 1.2 + Math.random() * 1.8;
+      const z = 0.15 + Math.random() * 0.15;
+      const life = 0.7 + Math.random() * 0.6;
+      this.bloodParticles.push(new BloodParticle(sprite.x, sprite.y, z, vx, vy, vz, life, color));
+    }
+  }
+
+  /**
+   * Render blood/gore droplets after the main sprite pass. Each particle is
+   * projected with the same camera math as sprites, depth-tested against the
+   * z-buffer at its screen column, and drawn as a small colored square that
+   * fades with its remaining life.
+   */
+  private renderBloodParticles(): void {
+    if (this.bloodParticles.length === 0) return;
+
+    const dirX = this.player.dirX;
+    const dirY = this.player.dirY;
+    const planeX = this.player.planeX;
+    const planeY = this.player.planeY;
+    const px = this.player.x;
+    const py = this.player.y;
+    const invDet = 1.0 / (planeX * dirY - dirX * planeY);
+
+    for (const p of this.bloodParticles) {
+      const spriteX = p.x - px;
+      const spriteY = p.y - py;
+      const transformX = invDet * (dirY * spriteX - dirX * spriteY);
+      const transformY = invDet * (-planeY * spriteX + planeX * spriteY);
+
+      if (transformY <= 0.1) continue;
+
+      const screenX = Math.floor((SCREEN_WIDTH / 2) * (1 + transformX / transformY));
+      if (screenX < 0 || screenX >= SCREEN_WIDTH) continue;
+      if (this.zBuffer.get(screenX) < transformY) continue;
+
+      // Z (world up/down) maps to vertical screen offset around mid-height,
+      // scaled by inverse depth so further droplets visually drop slower.
+      const screenY = Math.floor(SCREEN_HEIGHT / 2 - (p.z * SCREEN_HEIGHT) / transformY);
+      const size = Math.max(1, Math.floor(4 / transformY));
+      this.ctx.fillStyle = `rgba(${parseInt(p.color.slice(0, 2), 16)},${parseInt(p.color.slice(2, 4), 16)},${parseInt(p.color.slice(4, 6), 16)},${p.alpha})`;
+      this.ctx.fillRect(screenX - Math.floor(size / 2), screenY - Math.floor(size / 2), size, size);
+    }
+  }
+
+  /**
+   * Render flying rockets as a small fire-glow head with a 5-sample backward
+   * trail so the launcher's projectile is actually visible mid-flight.
+   * Trail positions are computed from the rocket's direction so no per-rocket
+   * trail state has to be kept.
+   */
+  private renderRockets(): void {
+    if (this.rockets.length === 0) return;
+
+    const dirX = this.player.dirX;
+    const dirY = this.player.dirY;
+    const planeX = this.player.planeX;
+    const planeY = this.player.planeY;
+    const px = this.player.x;
+    const py = this.player.y;
+    const invDet = 1.0 / (planeX * dirY - dirX * planeY);
+
+    for (const rocket of this.rockets) {
+      const TRAIL_SAMPLES = 5;
+      const TRAIL_STEP = 0.18;  // tiles between samples
+
+      // Render trail back-to-front (oldest first, so head ends up on top).
+      for (let i = TRAIL_SAMPLES; i >= 0; i--) {
+        const wx = rocket.x - rocket.dirX * TRAIL_STEP * i;
+        const wy = rocket.y - rocket.dirY * TRAIL_STEP * i;
+        const spriteX = wx - px;
+        const spriteY = wy - py;
+        const transformX = invDet * (dirY * spriteX - dirX * spriteY);
+        const transformY = invDet * (-planeY * spriteX + planeX * spriteY);
+        if (transformY <= 0.1) continue;
+
+        const screenX = Math.floor((SCREEN_WIDTH / 2) * (1 + transformX / transformY));
+        if (screenX < 0 || screenX >= SCREEN_WIDTH) continue;
+        if (this.zBuffer.get(screenX) < transformY) continue;
+
+        const screenY = Math.floor(SCREEN_HEIGHT / 2 - 8 / transformY);
+        const baseRadius = Math.max(2, Math.min(22, 12 / transformY));
+        const t = 1 - i / TRAIL_SAMPLES; // 1 at head, 0 at tail
+
+        if (i === 0) {
+          // Head: bright fire glow.
+          this.ctx.fillStyle = 'rgba(120, 30, 10, 0.45)';
+          this.ctx.beginPath();
+          this.ctx.arc(screenX, screenY, baseRadius * 1.7, 0, Math.PI * 2);
+          this.ctx.fill();
+          this.ctx.fillStyle = 'rgba(255, 120, 30, 0.9)';
+          this.ctx.beginPath();
+          this.ctx.arc(screenX, screenY, baseRadius, 0, Math.PI * 2);
+          this.ctx.fill();
+          this.ctx.fillStyle = 'rgba(255, 230, 140, 1)';
+          this.ctx.beginPath();
+          this.ctx.arc(screenX, screenY, baseRadius * 0.45, 0, Math.PI * 2);
+          this.ctx.fill();
+        } else {
+          // Smoke / fading flame trail samples.
+          const alpha = t * 0.55;
+          const radius = baseRadius * (0.7 + t * 0.6);
+          this.ctx.fillStyle = `rgba(80, 60, 50, ${alpha * 0.7})`;
+          this.ctx.beginPath();
+          this.ctx.arc(screenX, screenY, radius * 1.2, 0, Math.PI * 2);
+          this.ctx.fill();
+          this.ctx.fillStyle = `rgba(200, 90, 30, ${alpha})`;
+          this.ctx.beginPath();
+          this.ctx.arc(screenX, screenY, radius * 0.6, 0, Math.PI * 2);
+          this.ctx.fill();
         }
       }
     }
@@ -2621,6 +2760,12 @@ export class Renderer {
             sprite.hitFlashTimer -= deltaTime;
           }
 
+          // Spawn blood splatter on the alive → dying transition (any source).
+          if (sprite.isDying && !sprite.bloodSpawned) {
+            sprite.bloodSpawned = true;
+            this.spawnBloodAt(sprite);
+          }
+
           // Death-Animation: Timer herunterzählen und in Corpse-Status übergehen.
           if (sprite.isDying) {
             sprite.deathTimer -= deltaTime;
@@ -2628,6 +2773,13 @@ export class Renderer {
               sprite.isDying = false;
               sprite.isDead = true;
             }
+          }
+        }
+
+        // Blood particles: advance ballistic motion, cull expired.
+        for (let i = this.bloodParticles.length - 1; i >= 0; i--) {
+          if (this.bloodParticles[i].update(deltaTime)) {
+            this.bloodParticles.splice(i, 1);
           }
         }
 
@@ -2745,7 +2897,9 @@ export class Renderer {
         this.drawFloorAndCeiling();
         this.castRays();
         this.renderSprites();
+        this.renderBloodParticles();
         this.renderBioProjectiles();
+        this.renderRockets();
 
         // Weapon nur im Spiel rendern
         if (gameState === GameState.PLAYING || gameState === GameState.PAUSED) {

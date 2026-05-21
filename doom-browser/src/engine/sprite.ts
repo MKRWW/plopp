@@ -130,6 +130,10 @@ export class Sprite {
   public isDead: boolean = false;
   public corpseTexture: Texture | null = null;
 
+  // Death event marker — set once blood particles have been spawned for the
+  // alive → dying transition. Renderer-only, no AI involvement.
+  public bloodSpawned: boolean = false;
+
   constructor(x: number, y: number, type: SpriteType, texture: Texture | null = null) {
     this.x = x;
     this.y = y;
