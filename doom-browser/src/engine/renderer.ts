@@ -649,6 +649,12 @@ export class Renderer {
 
  /**
    * Startet einen asynchronen Level-Übergang mit Loading-Screen.
+   *
+   * generateLevel kann nach MAX_ATTEMPTS pathologischer Seed/Stage-Kombinationen
+   * werfen. Früher hat das die Loading-Anzeige bei 0% deadlocken lassen, weil
+   * `pendingLevel` dann nie gesetzt wurde. Jetzt: try/catch um den Aufruf,
+   * Retries mit perturbiertem Seed, und bei wiederholtem Fehlschlag ein
+   * sauberer Fallback zurück ins Hauptmenü statt eingefrorenem Screen.
    */
   private beginLevelTransition(): void {
     if (this.isLoading) return;
@@ -658,8 +664,25 @@ export class Renderer {
     this.gameStateManager.transitionTo(GameState.LOADING);
 
     setTimeout(() => {
-      this.pendingLevel = generateLevel(this.baseSeed, this.loadingTargetStage);
-      this.loadingAnimStart = performance.now();
+      const MAX_RETRIES = 5;
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        const trySeed = (this.baseSeed ^ (attempt * 0x85EBCA6B)) >>> 0;
+        try {
+          this.pendingLevel = generateLevel(trySeed, this.loadingTargetStage);
+          this.loadingAnimStart = performance.now();
+          return;
+        } catch (err) {
+          console.warn(`beginLevelTransition: generateLevel attempt ${attempt + 1}/${MAX_RETRIES} for stage ${this.loadingTargetStage} failed:`, err);
+        }
+      }
+
+      // All retries exhausted — bail out to the menu instead of hanging the
+      // loading screen forever.
+      console.error(`beginLevelTransition: giving up on stage ${this.loadingTargetStage} after ${MAX_RETRIES} attempts. Returning to menu.`);
+      this.isLoading = false;
+      this.pendingLevel = null;
+      this.loadingProgress = 0;
+      this.gameStateManager.transitionTo(GameState.MENU);
     }, 0);
   }
 
