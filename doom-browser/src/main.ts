@@ -7,7 +7,7 @@ import { generateLevel } from './engine/level-gen';
 import { worldState } from './engine/world';
 
 /**
- * Entry Point für das Doom-Browser-Spiel.
+ * Entry Point für Plopp.
  *
  * Bootstrap-Reihenfolge:
  *   1. Basis-Seed wählen (per Run, daraus werden alle Stages abgeleitet).

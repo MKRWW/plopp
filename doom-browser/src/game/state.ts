@@ -1,5 +1,5 @@
 /**
- * Game State Machine für Doom-Browser-Clone.
+ * Game State Machine für Plopp.
  * Zustände: MENU → PLAYING → DEAD → WIN → (Rückkehr nach MENU)
  */
 

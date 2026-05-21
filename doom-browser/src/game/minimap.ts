@@ -1,5 +1,5 @@
 /**
- * Minimap-Rendering für das Doom-Browser-Spiel.
+ * Minimap-Rendering für Plopp.
  * Zeigt eine Echtzeit-Karte in der oberen linken Ecke mit Spieler- und Gegner-Positionen.
  */
 

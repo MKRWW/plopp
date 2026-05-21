@@ -1,5 +1,5 @@
 /**
- * Waffe-Animaton-State für Doom-Browser-Clone.
+ * Waffe-Animation-State für Plopp.
  * Handled nur Animation: Bobbing, Recoil, Muzzle Flash.
  * Munition und Gesundheit werden über WeaponInventory / Player verwaltet.
  */

@@ -1,5 +1,5 @@
 /**
- * Sound-Manager via Web Audio API für das Doom-Browser-Spiel.
+ * Sound-Manager via Web Audio API für Plopp.
  * Generiert alle Sound-Effekte prozedural (keine externen Dateien nötig).
  * Unterstützt auch Hintergrundmusik aus MP3-Dateien.
  */
