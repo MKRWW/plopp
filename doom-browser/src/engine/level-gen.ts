@@ -49,6 +49,7 @@ export interface Level {
   keycard: Vec2;
   enemies: Vec2[];
   shooters: Vec2[];
+  latchers: Vec2[];
   ammo: Vec2[];
   health: Vec2[];
   secretHealth: Vec2 | null;
@@ -846,6 +847,11 @@ export function generateLevel(seed: number, stage: number): Level {
     const numShooters = clamp(Math.floor(stage * 1.2), 0, 8);
     const shooters: Vec2[] = placeItemsInRooms(map, rooms, excludeSpawnExit, numShooters, rng, used);
 
+    // Latchers: small, fast pounce parasites. Appear from stage 1 onwards
+    // and scale up faster than shooters because they're squishy.
+    const numLatchers = clamp(1 + Math.floor(stage * 1.5), 1, 10);
+    const latchers: Vec2[] = placeItemsInRooms(map, rooms, excludeSpawnExit, numLatchers, rng, used);
+
     const numAmmo = clamp(6 + Math.floor(stage * 1.0), 6, 12);
     const ammo: Vec2[] = placeItemsInRooms(map, rooms, excludeSpawnExit, numAmmo, rng, used);
 
@@ -888,6 +894,7 @@ export function generateLevel(seed: number, stage: number): Level {
       keycard: { x: blueKeycardTile.x + 0.5, y: blueKeycardTile.y + 0.5 },
       enemies,
       shooters,
+      latchers,
       ammo,
       health,
       secretHealth,

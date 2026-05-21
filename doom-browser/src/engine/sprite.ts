@@ -24,6 +24,7 @@ export enum EnemyAIState {
 export enum SpriteType {
   ENEMY = 'enemy',
   SHOOTER = 'shooter',
+  LATCHER = 'latcher',
   AMMO = 'ammo',
   HEALTH = 'health',
   KEYCARD = 'keycard',
@@ -52,11 +53,13 @@ export function isCollectableSprite(type: SpriteType): boolean {
 }
 
 /**
- * Enemy class distinguishes Grunt (melee) from Shooter (ranged).
+ * Enemy class distinguishes Grunt (melee), Shooter (ranged), and Latcher
+ * (pounce-and-bite, fragile but fast).
  */
 export enum EnemyClass {
   GRUNT = 'grunt',
-  SHOOTER = 'shooter'
+  SHOOTER = 'shooter',
+  LATCHER = 'latcher'
 }
 
 /** Shooter behavior constants (spec) */
@@ -65,6 +68,29 @@ export const AI_SHOOTER_MIN_DIST = 3.0;
 export const AI_SHOOTER_COOLDOWN = 2.5;
 export const AI_SHOOTER_DAMAGE = 25;
 export const AI_SHOOTER_MOVE_SPEED = 1.5;
+
+/**
+ * Latcher behavior constants. Latchers are small, fragile, and lethal at
+ * close range. Their gimmick is the wind-up-then-leap arc: they freeze
+ * briefly when in leap range, then launch in a parabolic arc that ignores
+ * collisions for its duration. Touch damage on impact.
+ */
+export const AI_LATCHER_MOVE_SPEED = 2.5;        // walking-approach speed
+export const AI_LATCHER_LEAP_RANGE = 3.0;        // start wind-up at this dist
+export const AI_LATCHER_LEAP_MIN_DIST = 0.6;     // too close, latch instead
+export const AI_LATCHER_WINDUP_DURATION = 0.4;   // crouch / tell before jump
+export const AI_LATCHER_LEAP_DURATION = 0.55;    // time spent airborne
+export const AI_LATCHER_LEAP_SPEED = 8.0;        // horizontal travel speed in arc
+export const AI_LATCHER_LEAP_COOLDOWN = 1.8;     // post-landing recovery
+export const AI_LATCHER_DAMAGE = 30;             // bite damage on contact
+export const AI_LATCHER_CONTACT_RADIUS = 0.55;   // touch radius for bite
+
+export enum LatcherState {
+  APPROACH = 'approach',
+  WINDUP = 'windup',
+  LEAP = 'leap',
+  RECOVER = 'recover'
+}
 
 export class Sprite {
   public x: number;
@@ -120,6 +146,16 @@ export class Sprite {
   // Muzzle flash visual feedback for shooter
   public muzzleFlashTimer: number = 0;
 
+  // Latcher-specific state machine + timers.
+  public latcherState: LatcherState = LatcherState.APPROACH;
+  public latcherStateTimer: number = 0;
+  public leapStartX: number = 0;
+  public leapStartY: number = 0;
+  public leapTargetX: number = 0;
+  public leapTargetY: number = 0;
+  /** 0..1 progress through the current leap arc. Drives vertical offset. */
+  public leapProgress: number = 0;
+
   // Hit feedback & death animation
   public isDying: boolean = false;
   public hitFlashTimer: number = 0;
@@ -142,7 +178,7 @@ export class Sprite {
     if (texture) {
       this.textures = [texture];
     }
-    if (type === SpriteType.ENEMY || type === SpriteType.SHOOTER) {
+    if (type === SpriteType.ENEMY || type === SpriteType.SHOOTER || type === SpriteType.LATCHER) {
       this.spawnX = x;
       this.spawnY = y;
       this.aiState = EnemyAIState.IDLE;
@@ -150,10 +186,10 @@ export class Sprite {
   }
 
   /**
-   * Returns true if this sprite is an enemy (ENEMY or SHOOTER).
+   * Returns true if this sprite is an enemy (ENEMY, SHOOTER, or LATCHER).
    */
   public get isEnemy(): boolean {
-    return this.type === SpriteType.ENEMY || this.type === SpriteType.SHOOTER;
+    return this.type === SpriteType.ENEMY || this.type === SpriteType.SHOOTER || this.type === SpriteType.LATCHER;
   }
 
   /**
@@ -175,7 +211,12 @@ export class Sprite {
     }
 
     // Animation phase ticks for collectables (item bob) and enemies (idle micro-anim).
-    if (isCollectableSprite(this.type) || this.type === SpriteType.ENEMY || this.type === SpriteType.SHOOTER) {
+    if (
+      isCollectableSprite(this.type) ||
+      this.type === SpriteType.ENEMY ||
+      this.type === SpriteType.SHOOTER ||
+      this.type === SpriteType.LATCHER
+    ) {
       this.floatingPhase += deltaTime * 2.0;
     }
   }

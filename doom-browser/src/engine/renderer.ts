@@ -3,7 +3,7 @@ import { MAP_WIDTH, MAP_HEIGHT, worldState, InteractionResult } from './world';
 import { ZBuffer } from './zbuffer';
 import { InputHandler, pointerLockSupported } from '../player/input';
 import { TextureManager, Texture } from './textures';
-import { Sprite, SpriteType, generateSpriteTextures, EnemyAIState, EnemyClass, AI_IDLE_PATROL_RADIUS, AI_AWARENESS_RADIUS, AI_GUNSHOT_RADIUS, AI_ALERT_TO_CHASE_DELAY, AI_CHASE_TO_ALERT_DELAY, AI_SHOOTER_RANGE, AI_SHOOTER_MIN_DIST, AI_SHOOTER_COOLDOWN, AI_SHOOTER_DAMAGE, AI_SHOOTER_MOVE_SPEED } from './sprite';
+import { Sprite, SpriteType, generateSpriteTextures, EnemyAIState, EnemyClass, AI_IDLE_PATROL_RADIUS, AI_AWARENESS_RADIUS, AI_GUNSHOT_RADIUS, AI_ALERT_TO_CHASE_DELAY, AI_CHASE_TO_ALERT_DELAY, AI_SHOOTER_RANGE, AI_SHOOTER_MIN_DIST, AI_SHOOTER_COOLDOWN, AI_SHOOTER_DAMAGE, AI_SHOOTER_MOVE_SPEED, LatcherState, AI_LATCHER_MOVE_SPEED, AI_LATCHER_LEAP_RANGE, AI_LATCHER_LEAP_MIN_DIST, AI_LATCHER_WINDUP_DURATION, AI_LATCHER_LEAP_DURATION, AI_LATCHER_LEAP_COOLDOWN, AI_LATCHER_DAMAGE, AI_LATCHER_CONTACT_RADIUS } from './sprite';
 import { huskCorpseTexture, spitterCorpseTexture, SpriteTextureSet } from './sprite-textures';
 import { GameState, GameStateManager } from '../game/state';
 import { Weapon, WeaponState } from '../game/weapon';
@@ -599,6 +599,34 @@ export class Renderer {
       this.sprites.push(shooter);
     }
 
+    // Latcher enemies — fast pounce parasites.
+    const latcherTextures = flat.get(SpriteType.LATCHER);
+    for (const pos of level.latchers) {
+      const latcher = new Sprite(pos.x, pos.y, SpriteType.LATCHER, latcherTextures?.[0] ?? null);
+      if (latcherTextures) latcher.textures = latcherTextures;
+      latcher.angleViews = spriteSet.latcherAngleViews;
+      latcher.facingAngle = Math.atan2(this.player.y - pos.y, this.player.x - pos.x);
+      // Disable auto-frame-cycling — handleLatcherChase manually sets the
+      // texture / currentFrame to reflect the AI state machine.
+      latcher.animationSpeed = 9999;
+      // Latcher corpses share the husk pile look for now — same chitin family.
+      latcher.corpseTexture = huskCorpseTexture;
+      latcher.aiState = EnemyAIState.IDLE;
+      latcher.alertTimer = 0;
+      latcher.alertFadeoutTimer = 0;
+      latcher.heardGunshotTime = 0;
+      latcher.enemyClass = EnemyClass.LATCHER;
+      latcher.health = 1;  // single shot kills it
+      latcher.latcherState = LatcherState.APPROACH;
+      latcher.latcherStateTimer = 0;
+      const angle = Math.random() * Math.PI * 2;
+      const dist = Math.random() * AI_IDLE_PATROL_RADIUS;
+      latcher.idleWanderTargetX = pos.x + Math.cos(angle) * dist;
+      latcher.idleWanderTargetY = pos.y + Math.sin(angle) * dist;
+      latcher.idleWanderTimer = 1 + Math.random() * 2;
+      this.sprites.push(latcher);
+    }
+
     // Ammo
     for (const pos of level.ammo) {
       const a = new Sprite(pos.x, pos.y, SpriteType.AMMO, ammoTextures?.[0] ?? null);
@@ -797,10 +825,19 @@ export class Renderer {
       }
       const spriteWidth = spriteHeight;
 
+      // Vertical screen offset for Latchers in mid-leap — parabolic arc that
+      // peaks at leapProgress 0.5 and lands at 0 / 1. Lift in tiles scaled by
+      // inverse depth so the on-screen rise matches perspective.
+      let verticalScreenOffset = 0;
+      if (sprite.type === SpriteType.LATCHER && sprite.latcherState === LatcherState.LEAP) {
+        const arcHeight = Math.sin(sprite.leapProgress * Math.PI) * 0.6; // tiles
+        verticalScreenOffset = -arcHeight * (SCREEN_HEIGHT / transformY);
+      }
+
       // Zeichen-Grenzen berechnen
-      let drawStartY = -spriteHeight / 2 + SCREEN_HEIGHT / 2;
+      let drawStartY = -spriteHeight / 2 + SCREEN_HEIGHT / 2 + verticalScreenOffset;
       if (drawStartY < 0) drawStartY = 0;
-      let drawEndY = spriteHeight / 2 + SCREEN_HEIGHT / 2;
+      let drawEndY = spriteHeight / 2 + SCREEN_HEIGHT / 2 + verticalScreenOffset;
       if (drawEndY >= SCREEN_HEIGHT) drawEndY = SCREEN_HEIGHT - 1;
 
       let drawStartX = -spriteWidth / 2 + spriteScreenX;
@@ -2498,6 +2535,8 @@ export class Renderer {
 
           if (sprite.enemyClass === EnemyClass.SHOOTER) {
             this.handleShooterChase(sprite, px, py, dist, dx, dy, aliveEnemies, deltaTime);
+          } else if (sprite.enemyClass === EnemyClass.LATCHER) {
+            this.handleLatcherChase(sprite, px, py, dist, dx, dy, aliveEnemies, deltaTime);
           } else {
             this.handleGruntChase(sprite, px, py, dist, dx, dy, attackRange, attackDamage, attackCooldown, chaseSpeed, aliveEnemies, deltaTime);
           }
@@ -2618,6 +2657,115 @@ export class Renderer {
 
     if (sprite.muzzleFlashTimer > 0) {
       sprite.muzzleFlashTimer -= deltaTime;
+    }
+  }
+
+  /**
+   * Latcher AI: small parasite that approaches at high speed, freezes for
+   * a brief wind-up tell, then leaps in a parabolic arc toward the player's
+   * position at the start of the leap. Touch damage on contact during the
+   * leap, then a recovery cooldown before it can wind up again.
+   */
+  private handleLatcherChase(
+    sprite: Sprite,
+    px: number, py: number,
+    dist: number, dx: number, dy: number,
+    aliveEnemies: Sprite[],
+    deltaTime: number
+  ): void {
+    sprite.latcherStateTimer += deltaTime;
+
+    switch (sprite.latcherState) {
+      case LatcherState.APPROACH: {
+        // Close in toward the player at walking speed.
+        if (dist <= AI_LATCHER_LEAP_RANGE && dist > AI_LATCHER_LEAP_MIN_DIST &&
+            hasLineOfSight(sprite.x, sprite.y, px, py)) {
+          // In leap range — switch to wind-up.
+          sprite.latcherState = LatcherState.WINDUP;
+          sprite.latcherStateTimer = 0;
+          sprite.currentFrame = 1; // 'walk' pose maps to windup
+          if (sprite.textures.length > 1) sprite.texture = sprite.textures[1];
+          break;
+        }
+
+        const speed = AI_LATCHER_MOVE_SPEED;
+        const moveX = (dx / dist) * speed * deltaTime;
+        const moveY = (dy / dist) * speed * deltaTime;
+        const newX = slideAlongX(sprite.x, moveX, sprite.y, ENEMY_RADIUS);
+        const newY = slideAlongY(sprite.y, moveY, newX, ENEMY_RADIUS);
+        this.applyEntityAvoidance(newX, newY, sprite, px, py, aliveEnemies);
+        sprite.currentFrame = 0;
+        if (sprite.textures.length > 0) sprite.texture = sprite.textures[0];
+
+        // Bite if we're already touching.
+        if (dist < AI_LATCHER_CONTACT_RADIUS && !sprite.attackTimer) {
+          this.player.health -= AI_LATCHER_DAMAGE;
+          this.triggerDamageFlash();
+          sprite.attackTimer = AI_LATCHER_LEAP_COOLDOWN;
+        }
+        if (sprite.attackTimer > 0) sprite.attackTimer -= deltaTime;
+        break;
+      }
+
+      case LatcherState.WINDUP: {
+        // Freeze and crouch. After WINDUP_DURATION, snapshot player position
+        // and launch into the leap arc.
+        sprite.currentFrame = 1;
+        if (sprite.textures.length > 1) sprite.texture = sprite.textures[1];
+        if (sprite.latcherStateTimer >= AI_LATCHER_WINDUP_DURATION) {
+          sprite.latcherState = LatcherState.LEAP;
+          sprite.latcherStateTimer = 0;
+          sprite.leapStartX = sprite.x;
+          sprite.leapStartY = sprite.y;
+          sprite.leapTargetX = px;
+          sprite.leapTargetY = py;
+          sprite.leapProgress = 0;
+          sprite.currentFrame = 2; // 'attack' pose = leap
+          if (sprite.textures.length > 2) sprite.texture = sprite.textures[2];
+        }
+        break;
+      }
+
+      case LatcherState.LEAP: {
+        // Move along the line from leapStart to leapTarget. Vertical Z-arc is
+        // computed at render time via leapProgress.
+        sprite.leapProgress = Math.min(1, sprite.latcherStateTimer / AI_LATCHER_LEAP_DURATION);
+        const t = sprite.leapProgress;
+        sprite.x = sprite.leapStartX + (sprite.leapTargetX - sprite.leapStartX) * t;
+        sprite.y = sprite.leapStartY + (sprite.leapTargetY - sprite.leapStartY) * t;
+
+        // Bite check during flight.
+        const ldx = px - sprite.x;
+        const ldy = py - sprite.y;
+        const ldist = Math.sqrt(ldx * ldx + ldy * ldy);
+        if (ldist < AI_LATCHER_CONTACT_RADIUS) {
+          this.player.health -= AI_LATCHER_DAMAGE;
+          this.triggerDamageFlash();
+          sprite.latcherState = LatcherState.RECOVER;
+          sprite.latcherStateTimer = 0;
+          sprite.leapProgress = 0;
+          break;
+        }
+
+        if (sprite.leapProgress >= 1) {
+          // Landed without hitting — recover.
+          sprite.latcherState = LatcherState.RECOVER;
+          sprite.latcherStateTimer = 0;
+          sprite.leapProgress = 0;
+        }
+        break;
+      }
+
+      case LatcherState.RECOVER: {
+        // Brief stunned recovery, then resume approach.
+        sprite.currentFrame = 0;
+        if (sprite.textures.length > 0) sprite.texture = sprite.textures[0];
+        if (sprite.latcherStateTimer >= AI_LATCHER_LEAP_COOLDOWN) {
+          sprite.latcherState = LatcherState.APPROACH;
+          sprite.latcherStateTimer = 0;
+        }
+        break;
+      }
     }
   }
 
