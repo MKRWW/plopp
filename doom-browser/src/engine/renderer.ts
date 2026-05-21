@@ -718,8 +718,11 @@ export class Renderer {
     const invDet = 1.0 / (planeX * dirY - dirX * planeY);
 
     for (const sprite of this.sprites) {
-      // Floating-Offset für Items (Schweben)
+      // Floating-Offset für Items (Schweben) bzw. subtiler Idle-Bob für Gegner.
       let floatingOffset = sprite.getFloatingOffset();
+      if ((sprite.type === SpriteType.ENEMY || sprite.type === SpriteType.SHOOTER) && sprite.isAlive) {
+        floatingOffset += Math.sin(sprite.floatingPhase) * 0.02;
+      }
 
       // Death-Animation: Gegner sackt nach unten und wird kleiner
       let deathProgress = 0;
@@ -881,11 +884,24 @@ export class Renderer {
               let g = srcData[srcIdx + 1] * brightness;
               let b = srcData[srcIdx + 2] * brightness;
 
-              // Hit-Flash: rot/weiß aufblitzen
+              // Hit-Flash: pro Gegner-Klasse eingefärbt (Cyan für Husk, Bio-Grün für Spitter).
               if (sprite.hitFlashTimer > 0) {
-                r = Math.min(255, r + 180);
-                g = Math.min(255, g + 120);
-                b = Math.min(255, b + 80);
+                if (sprite.type === SpriteType.SHOOTER) {
+                  // Spitter: Bio-Grün (SPITTER_BIO_HOT-Richtung)
+                  r = Math.min(255, r + 120);
+                  g = Math.min(255, g + 200);
+                  b = Math.min(255, b + 60);
+                } else if (sprite.type === SpriteType.ENEMY) {
+                  // Husk: Cyan (HUSK_EYE_HOT-Richtung)
+                  r = Math.min(255, r + 50);
+                  g = Math.min(255, g + 180);
+                  b = Math.min(255, b + 220);
+                } else {
+                  // Fallback (sollte nicht vorkommen — andere Sprites haben keinen Hit-Flash)
+                  r = Math.min(255, r + 180);
+                  g = Math.min(255, g + 120);
+                  b = Math.min(255, b + 80);
+                }
               }
 
               // Death-Animation: dunkler + rot + ausfaden

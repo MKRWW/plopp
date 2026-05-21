@@ -170,13 +170,14 @@ export class Sprite {
       }
     }
 
-    if (this.type === SpriteType.ENEMY) {
+    // Animation phase ticks for collectables (item bob) and enemies (idle micro-anim).
+    if (isCollectableSprite(this.type) || this.type === SpriteType.ENEMY || this.type === SpriteType.SHOOTER) {
       this.floatingPhase += deltaTime * 2.0;
     }
   }
 
   public getFloatingOffset(): number {
-    if (this.type === SpriteType.ENEMY) {
+    if (isCollectableSprite(this.type)) {
       return Math.sin(this.floatingPhase) * 0.05;
     }
     return 0;
