@@ -3,6 +3,17 @@ import { SpriteType } from './sprite';
 
 const SPRITE_TEXTURE_SIZE = 64;
 
+const HUSK_SHADOW    = '#05080a';
+const HUSK_CARAPACE  = '#0a0d10';
+const HUSK_PLATE     = '#173e4a';
+const HUSK_PLATE_LIT = '#246079';
+const HUSK_UNDERSIDE = '#1a2228';
+const HUSK_EYE_DIM   = '#1c4a55';
+const HUSK_EYE       = '#3aa7b8';
+const HUSK_EYE_HOT   = '#7be8f8';
+const HUSK_BLADE     = '#2b2f33';
+const HUSK_BLADE_LIT = '#4d575e';
+
 type EnemyPose = 'idle' | 'walk' | 'attack';
 type EnemyView = 'front' | 'frontQuarter' | 'side' | 'backQuarter' | 'back';
 
@@ -117,7 +128,7 @@ function generateHuskTexture(pose: EnemyPose, view: EnemyView, mirror: boolean):
 
   switch (view) {
     case 'front':
-      drawEnemyFront(ctx, cx, headY, torsoY, attacking, legKick, armSwing);
+      drawHuskFront(ctx, pose);
       break;
     case 'frontQuarter':
       drawEnemyQuarter(ctx, cx, headY, torsoY, attacking, legKick, armSwing, /*back*/ false);
@@ -214,6 +225,230 @@ function mirrorTextureHorizontal(srcCanvas: HTMLCanvasElement): Texture {
     height: SPRITE_TEXTURE_SIZE,
     data: dctx.getImageData(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE)
   };
+}
+
+/* ----- Husk Front view (insectoid alien) ----- */
+
+function drawHuskFront(ctx: CanvasRenderingContext2D, pose: EnemyPose): void {
+  drawHuskShadow(ctx);
+  drawHuskLegs(ctx, pose);
+  drawHuskBody(ctx, pose);
+  drawHuskMantisArms(ctx, pose);
+  drawHuskEyeBand(ctx, pose);
+}
+
+function drawHuskShadow(ctx: CanvasRenderingContext2D): void {
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  ctx.fillStyle = HUSK_SHADOW;
+  ctx.beginPath();
+  ctx.ellipse(32, 58, 12, 2, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawHuskLegs(ctx: CanvasRenderingContext2D, pose: EnemyPose): void {
+  const cx = 32;
+
+  let leftThighX: number;
+  let rightThighX: number;
+  let leftShinX: number;
+  let rightShinX: number;
+  let leftClaw1X: number, leftClaw2X: number;
+  let rightClaw1X: number, rightClaw2X: number;
+
+  if (pose === 'attack') {
+    leftThighX = cx - 18;  rightThighX = cx + 14;
+    leftShinX  = cx - 22;  rightShinX  = cx + 18;
+    leftClaw1X = cx - 24;  leftClaw2X  = cx - 20;
+    rightClaw1X = cx + 20; rightClaw2X = cx + 24;
+  } else if (pose === 'walk') {
+    leftThighX = cx - 13;  rightThighX = cx + 11;
+    leftShinX  = cx - 15;  rightShinX  = cx + 14;
+    leftClaw1X = cx - 17;  leftClaw2X  = cx - 13;
+    rightClaw1X = cx + 14; rightClaw2X = cx + 18;
+  } else {
+    leftThighX = cx - 15;  rightThighX = cx + 11;
+    leftShinX  = cx - 18;  rightShinX  = cx + 14;
+    leftClaw1X = cx - 20;  leftClaw2X  = cx - 16;
+    rightClaw1X = cx + 14; rightClaw2X = cx + 18;
+  }
+
+  // Oberschenkel
+  ctx.fillStyle = HUSK_CARAPACE;
+  ctx.fillRect(leftThighX,  42, 4, 10);
+  ctx.fillRect(rightThighX, 42, 4, 10);
+
+  // Unterschenkel
+  ctx.fillStyle = HUSK_PLATE;
+  ctx.fillRect(leftShinX,  50, 4, 8);
+  ctx.fillRect(rightShinX, 50, 4, 8);
+
+  // Klauen (je 2 pro Bein)
+  ctx.fillStyle = HUSK_BLADE;
+  ctx.fillRect(leftClaw1X,  57, 3, 2);
+  ctx.fillRect(leftClaw2X,  57, 3, 2);
+  ctx.fillRect(rightClaw1X, 57, 3, 2);
+  ctx.fillRect(rightClaw2X, 57, 3, 2);
+}
+
+function drawHuskBody(ctx: CanvasRenderingContext2D, pose: EnemyPose): void {
+  const cx = 32;
+  // Merged thorax + head: oval, segmented, ~24 px tall, ~26 px wide
+  const bodyTop = pose === 'attack' ? 17 : 18;
+  const bodyBottom = 42;
+
+  // Base silhouette - dark carapace
+  ctx.fillStyle = HUSK_CARAPACE;
+  ctx.beginPath();
+  ctx.ellipse(cx, (bodyTop + bodyBottom) / 2, 13, (bodyBottom - bodyTop) / 2, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 3 horizontal carapace segments
+  const segHeight = (bodyBottom - bodyTop) / 3;
+  for (let i = 0; i < 3; i++) {
+    const segTop = bodyTop + i * segHeight;
+    const segBottom = segTop + segHeight;
+
+    // Segment fill
+    ctx.fillStyle = HUSK_PLATE;
+    ctx.beginPath();
+    ctx.ellipse(cx, (segTop + segBottom) / 2, 12, segHeight / 2 - 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Top rim highlight
+    ctx.fillStyle = HUSK_PLATE_LIT;
+    ctx.fillRect(cx - 11, segTop, 22, 1);
+  }
+
+  // Underside shadow at bottom
+  ctx.fillStyle = HUSK_UNDERSIDE;
+  ctx.beginPath();
+  ctx.ellipse(cx, bodyBottom - 2, 10, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawHuskMantisArms(ctx: CanvasRenderingContext2D, pose: EnemyPose): void {
+  const cx = 32;
+
+  if (pose === 'attack') {
+    // Arms raised and forward, blades above head
+
+    // Left arm segments
+    ctx.strokeStyle = HUSK_CARAPACE;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - 12, 28);
+    ctx.lineTo(cx - 18, 20);
+    ctx.lineTo(cx - 22, 10);
+    ctx.stroke();
+
+    // Right arm segments
+    ctx.beginPath();
+    ctx.moveTo(cx + 12, 28);
+    ctx.lineTo(cx + 18, 20);
+    ctx.lineTo(cx + 22, 10);
+    ctx.stroke();
+
+    // Scythe blades
+    ctx.strokeStyle = HUSK_BLADE;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(cx - 22, 10);
+    ctx.quadraticCurveTo(cx - 26, 4, cx - 20, 2);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(cx + 22, 10);
+    ctx.quadraticCurveTo(cx + 26, 4, cx + 20, 2);
+    ctx.stroke();
+
+    // Blade edge highlight
+    ctx.strokeStyle = HUSK_BLADE_LIT;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx - 21, 9);
+    ctx.quadraticCurveTo(cx - 24, 5, cx - 20, 3);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(cx + 21, 9);
+    ctx.quadraticCurveTo(cx + 24, 5, cx + 20, 3);
+    ctx.stroke();
+
+    ctx.lineWidth = 1;
+  } else {
+    // Arms hanging diagonally forward-down, slightly bent (idle/walk)
+    const bend = pose === 'walk' ? 1 : 0;
+
+    // Left arm
+    ctx.strokeStyle = HUSK_CARAPACE;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - 12, 28);
+    ctx.lineTo(cx - 16, 38);
+    ctx.lineTo(cx - 18, 48);
+    ctx.stroke();
+
+    // Right arm
+    ctx.beginPath();
+    ctx.moveTo(cx + 12, 28);
+    ctx.lineTo(cx + 16, 38);
+    ctx.lineTo(cx + 18, 48);
+    ctx.stroke();
+
+    // Scythe blades (curved, pointing down-forward)
+    ctx.strokeStyle = HUSK_BLADE;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(cx - 18, 48);
+    ctx.quadraticCurveTo(cx - 20, 52, cx - 16, 56);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(cx + 18, 48);
+    ctx.quadraticCurveTo(cx + 20, 52, cx + 16, 56);
+    ctx.stroke();
+
+    // Blade edge highlight
+    ctx.strokeStyle = HUSK_BLADE_LIT;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx - 17, 49);
+    ctx.quadraticCurveTo(cx - 19, 52, cx - 16, 55);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(cx + 17, 49);
+    ctx.quadraticCurveTo(cx + 19, 52, cx + 16, 55);
+    ctx.stroke();
+
+    ctx.lineWidth = 1;
+  }
+}
+
+function drawHuskEyeBand(ctx: CanvasRenderingContext2D, pose: EnemyPose): void {
+  const cx = 32;
+  const y = 24;
+
+  let eyeColor: string;
+  if (pose === 'idle') eyeColor = HUSK_EYE_DIM;
+  else if (pose === 'walk') eyeColor = HUSK_EYE;
+  else {
+    eyeColor = HUSK_EYE_HOT;
+    ctx.shadowColor = HUSK_EYE_HOT;
+    ctx.shadowBlur = 6;
+  }
+
+  ctx.fillStyle = eyeColor;
+
+  // 3 glow points, each 2x2 px
+  ctx.fillRect(cx - 7, y, 2, 2);
+  ctx.fillRect(cx - 1, y, 2, 2);
+  ctx.fillRect(cx + 5, y, 2, 2);
+
+  // Always reset shadow
+  ctx.shadowBlur = 0;
 }
 
 /* ----- Front view (original detailed look) ----- */
