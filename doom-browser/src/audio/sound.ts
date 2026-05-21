@@ -16,7 +16,9 @@ export enum SoundType {
   STEP = 'step',
   DOOR = 'door',
   ROCKET_SHOOT = 'rocketShoot',
-  ROCKET_EXPLOSION = 'rocketExplosion'
+  ROCKET_EXPLOSION = 'rocketExplosion',
+  HEARTBEAT = 'heartbeat',
+  AMMO_LOW = 'ammoLow'
 }
 
 /**
@@ -195,7 +197,64 @@ export class SoundManager {
       case SoundType.ROCKET_EXPLOSION:
         this.playRocketExplosion();
         break;
+      case SoundType.HEARTBEAT:
+        this.playHeartbeat();
+        break;
+      case SoundType.AMMO_LOW:
+        this.playAmmoLow();
+        break;
     }
+  }
+
+  /**
+   * Short high beep warning that the active weapon's ammo is running out.
+   * Two short clicks at ~1.2 kHz so it stands out against the rest of the
+   * audio bed without being annoying on every shot.
+   */
+  private playAmmoLow(): void {
+    if (!this.audioContext || !this.masterGain) return;
+
+    const t = this.audioContext.currentTime;
+    for (let i = 0; i < 2; i++) {
+      const start = t + i * 0.09;
+      const osc = this.audioContext.createOscillator();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(1200, start);
+
+      const gain = this.audioContext.createGain();
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.18, start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.06);
+
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(start);
+      osc.stop(start + 0.07);
+    }
+  }
+
+  /**
+   * Heartbeat thump for the low-health overlay. Single low sine pulse,
+   * very brief (~120 ms), small gain so it sits under everything else.
+   */
+  private playHeartbeat(): void {
+    if (!this.audioContext || !this.masterGain) return;
+
+    const t = this.audioContext.currentTime;
+    const osc = this.audioContext.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(70, t);
+    osc.frequency.exponentialRampToValueAtTime(35, t + 0.12);
+
+    const gain = this.audioContext.createGain();
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.5, t + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(t);
+    osc.stop(t + 0.13);
   }
 
   /**

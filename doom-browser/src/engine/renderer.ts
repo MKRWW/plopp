@@ -107,6 +107,23 @@ export class Renderer {
   private bioProjectiles: BioProjectile[] = [];
   private bloodParticles: BloodParticle[] = [];
 
+  // Headbob: phase ticks while moving, intensity fades in/out for smoothness.
+  private headbobPhase: number = 0;
+  private headbobIntensity: number = 0;
+
+  // Low-health heartbeat: timer counts until next pulse, pulseTimer fades the
+  // visual vignette out after each pulse. Both run only when health < threshold.
+  private heartbeatTimer: number = 0;
+  private heartbeatPulseTimer: number = 0;
+  private readonly LOW_HEALTH_THRESHOLD: number = 25;
+  private readonly HEARTBEAT_PULSE_DURATION: number = 0.45;
+
+  // Ammo-low warning: edge-triggered when current weapon ammo drops at or
+  // below LOW_AMMO_THRESHOLD. Auto-resets when ammo climbs back up (pickup
+  // or weapon switch).
+  private ammoLowWarned: boolean = false;
+  private readonly LOW_AMMO_THRESHOLD: number = 5;
+
   // Edge-Triggering für Interaktion (E-Taste)
   private wasInteractPressedLastFrame: boolean = false;
   // Separates Edge-Tracking für Exit-Door-E (verhindert Mehrfach-Trigger pro Druck)
@@ -2244,6 +2261,32 @@ export class Renderer {
   /**
    * Zeichnet den Damage-Flash (rote Bildschirmränder).
    */
+  /**
+   * Red radial vignette that pulses on heartbeat when player.health is below
+   * LOW_HEALTH_THRESHOLD. Drawn before drawDamageFlash so the damage flash
+   * still overrides on direct hits.
+   */
+  private drawLowHealthVignette(): void {
+    if (this.player.health <= 0 || this.player.health >= this.LOW_HEALTH_THRESHOLD) return;
+
+    const severity = 1 - this.player.health / this.LOW_HEALTH_THRESHOLD; // 0..1
+    const baseAlpha = 0.15 + severity * 0.25;
+    const pulseAlpha = (this.heartbeatPulseTimer / this.HEARTBEAT_PULSE_DURATION) * 0.35;
+    const alpha = Math.min(0.9, baseAlpha + pulseAlpha);
+
+    const cx = SCREEN_WIDTH / 2;
+    const cy = SCREEN_HEIGHT / 2;
+    const innerR = Math.min(SCREEN_WIDTH, SCREEN_HEIGHT) * 0.25;
+    const outerR = Math.sqrt(cx * cx + cy * cy);
+
+    const grad = this.ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR);
+    grad.addColorStop(0, 'rgba(120, 0, 0, 0)');
+    grad.addColorStop(0.6, `rgba(150, 0, 0, ${alpha * 0.4})`);
+    grad.addColorStop(1, `rgba(180, 0, 0, ${alpha})`);
+    this.ctx.fillStyle = grad;
+    this.ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  }
+
   private drawDamageFlash(): void {
     if (this.damageFlashTimer <= 0) return;
 
@@ -2783,6 +2826,35 @@ export class Renderer {
           }
         }
 
+        // Ammo-low warning: edge-trigger one beep when ammo drops at or below
+        // threshold for the active weapon. Reset once ammo climbs back up.
+        const currentAmmo = this.inventory.getCurrentAmmo();
+        if (currentAmmo <= this.LOW_AMMO_THRESHOLD && currentAmmo > 0 && !this.ammoLowWarned) {
+          this.soundManager.play(SoundType.AMMO_LOW);
+          this.ammoLowWarned = true;
+        } else if (currentAmmo > this.LOW_AMMO_THRESHOLD) {
+          this.ammoLowWarned = false;
+        }
+
+        // Low-health heartbeat: only active below threshold. Pulse rate scales
+        // with how low health is — faster (and louder visually) the closer to
+        // dying you are.
+        if (this.player.health > 0 && this.player.health < this.LOW_HEALTH_THRESHOLD) {
+          const severity = 1 - this.player.health / this.LOW_HEALTH_THRESHOLD; // 0..1
+          const pulseInterval = 1.0 - severity * 0.5; // 1.0 s → 0.5 s
+          this.heartbeatTimer += deltaTime;
+          if (this.heartbeatTimer >= pulseInterval) {
+            this.heartbeatTimer = 0;
+            this.heartbeatPulseTimer = this.HEARTBEAT_PULSE_DURATION;
+            this.soundManager.play(SoundType.HEARTBEAT);
+          }
+        } else {
+          this.heartbeatTimer = 0;
+        }
+        if (this.heartbeatPulseTimer > 0) {
+          this.heartbeatPulseTimer -= deltaTime;
+        }
+
         // Gegner-KI updaten (Chase + Angriff)
         this.updateEnemyAI(deltaTime);
 
@@ -2880,13 +2952,32 @@ export class Renderer {
       // Clear
       this.ctx.clearRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
 
-      // Screen Shake: Canvas transform anwenden
+      // Headbob: tick phase + envelope based on movement, then apply transform.
+      const isMovingNow = gameState === GameState.PLAYING && (
+        this.input.isForward() || this.input.isBackward() ||
+        this.input.isStrafeLeft() || this.input.isStrafeRight()
+      );
+      const sprintFactor = this.isSprinting ? 1.4 : 1.0;
+      this.headbobPhase += deltaTime * 8 * sprintFactor;
+      if (isMovingNow) {
+        this.headbobIntensity = Math.min(1, this.headbobIntensity + deltaTime * 4);
+      } else {
+        this.headbobIntensity = Math.max(0, this.headbobIntensity - deltaTime * 6);
+      }
+      const bobY = Math.sin(this.headbobPhase) * 2.5 * this.headbobIntensity * sprintFactor;
+      const bobX = Math.sin(this.headbobPhase * 0.5) * 1.2 * this.headbobIntensity * sprintFactor;
+
+      // Screen Shake + Headbob: Canvas transform anwenden
       this.ctx.save();
+      let shakeX = 0;
+      let shakeY = 0;
       if (this.screenShakeTimer > 0) {
         const shakeIntensity = this.screenShakeIntensity * (this.screenShakeTimer / 0.12);
-        const shakeX = (Math.random() - 0.5) * shakeIntensity * 2;
-        const shakeY = (Math.random() - 0.5) * shakeIntensity * 2;
-        this.ctx.translate(shakeX, shakeY);
+        shakeX = (Math.random() - 0.5) * shakeIntensity * 2;
+        shakeY = (Math.random() - 0.5) * shakeIntensity * 2;
+      }
+      if (shakeX !== 0 || shakeY !== 0 || bobX !== 0 || bobY !== 0) {
+        this.ctx.translate(shakeX + bobX, shakeY + bobY);
       }
 
       // LOADING: render loading screen, skip gameplay rendering
@@ -2905,6 +2996,7 @@ export class Renderer {
         if (gameState === GameState.PLAYING || gameState === GameState.PAUSED) {
           this.drawWeapon();
           this.drawHUD();
+          this.drawLowHealthVignette();
           this.drawDamageFlash();
           this.drawHitMarker();
           this.drawWallImpact();
