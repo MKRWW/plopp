@@ -3,15 +3,15 @@ import { MAP_WIDTH, MAP_HEIGHT, worldState, InteractionResult } from './world';
 import { ZBuffer } from './zbuffer';
 import { InputHandler, pointerLockSupported } from '../player/input';
 import { TextureManager, Texture } from './textures';
-import { Sprite, SpriteType, generateSpriteTextures } from './sprite';
-import { corpseTexture } from './sprite-textures';
+import { Sprite, SpriteType, generateSpriteTextures, EnemyAIState, EnemyClass, AI_IDLE_PATROL_RADIUS, AI_AWARENESS_RADIUS, AI_GUNSHOT_RADIUS, AI_ALERT_TO_CHASE_DELAY, AI_CHASE_TO_ALERT_DELAY, AI_SHOOTER_RANGE, AI_SHOOTER_MIN_DIST, AI_SHOOTER_COOLDOWN, AI_SHOOTER_DAMAGE, AI_SHOOTER_MOVE_SPEED } from './sprite';
+import { corpseTexture, SpriteTextureSet } from './sprite-textures';
 import { GameState, GameStateManager } from '../game/state';
 import { Weapon, WeaponState } from '../game/weapon';
 import { WeaponInventory, WeaponType, WEAPONS } from '../game/weapons';
 import { RocketProjectile } from './rocket-projectile';
 import { slideAlongX, slideAlongY, PLAYER_RADIUS, ENEMY_RADIUS, MIN_ENTITY_DIST,
           resolveAllEntityOverlaps, wouldOverlapEntity, resolveEntityCollision,
-          ROCKET_RADIUS, positionCollides } from './collision';
+          ROCKET_RADIUS, positionCollides, hasLineOfSight } from './collision';
 import { Minimap } from '../game/minimap';
 import { SoundManager, SoundType } from '../audio/sound';
 import { Level, generateLevel } from './level-gen';
@@ -277,6 +277,7 @@ export class Renderer {
         def.explosionDamage ?? 10
       );
       this.rockets.push(rocket);
+      this.broadcastGunshot();
       return;
     }
 
@@ -317,6 +318,43 @@ export class Renderer {
       }
     } else {
       this.triggerWallImpact();
+    }
+    this.broadcastGunshot();
+  }
+
+  /**
+   * Informs all alive enemies that a gunshot occurred at the player's position.
+   * Enemies within AI_GUNSHOT_RADIUS transition to (or stay in) ALERT state with
+   * their alert timer reset.
+   */
+  private broadcastGunshot(): void {
+    const px = this.player.x;
+    const py = this.player.y;
+
+    for (const sprite of this.sprites) {
+      if (sprite.type !== SpriteType.ENEMY && sprite.type !== SpriteType.SHOOTER) continue;
+      if (!sprite.isAlive || sprite.isDying || sprite.isDead) continue;
+
+      const dx = px - sprite.x;
+      const dy = py - sprite.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist > AI_GUNSHOT_RADIUS) continue;
+
+      const angleToPlayer = Math.atan2(dy, dx);
+
+      if (sprite.aiState === EnemyAIState.IDLE) {
+        sprite.aiState = EnemyAIState.ALERT;
+        sprite.alertTimer = AI_ALERT_TO_CHASE_DELAY;
+        sprite.facingAngle = angleToPlayer;
+        sprite.heardGunshotTime = performance.now() / 1000;
+      } else if (sprite.aiState === EnemyAIState.ALERT) {
+        sprite.alertTimer = AI_ALERT_TO_CHASE_DELAY;
+        sprite.facingAngle = angleToPlayer;
+        sprite.heardGunshotTime = performance.now() / 1000;
+      } else if (sprite.aiState === EnemyAIState.CHASE) {
+        sprite.heardGunshotTime = performance.now() / 1000;
+      }
     }
   }
 
@@ -393,7 +431,7 @@ export class Renderer {
     let closestDist = Infinity;
 
     for (const sprite of this.sprites) {
-      if (sprite.type !== SpriteType.ENEMY) continue;
+      if (sprite.type !== SpriteType.ENEMY && sprite.type !== SpriteType.SHOOTER) continue;
       if (sprite.isDying || sprite.isDead) continue;
 
       // Vektor vom Spieler zum Sprite
@@ -476,7 +514,7 @@ export class Renderer {
    * optionales Secret-Item. Liest ausschließlich aus `this.currentLevel`.
    */
   private initializeSprites(): void {
-    const spriteSet = generateSpriteTextures();
+    const spriteSet: SpriteTextureSet = generateSpriteTextures();
     const flat = spriteSet.flat;
     const enemyTextures = flat.get(SpriteType.ENEMY);
     const ammoTextures = flat.get(SpriteType.AMMO);
@@ -500,7 +538,43 @@ export class Renderer {
       enemy.facingAngle = Math.atan2(this.player.y - pos.y, this.player.x - pos.x);
       enemy.animationSpeed = 0.4;
       enemy.corpseTexture = corpseTexture;
+      enemy.aiState = EnemyAIState.IDLE;
+      enemy.alertTimer = 0;
+      enemy.alertFadeoutTimer = 0;
+      enemy.heardGunshotTime = 0;
+      const angle = Math.random() * Math.PI * 2;
+      const dist = Math.random() * AI_IDLE_PATROL_RADIUS;
+      enemy.idleWanderTargetX = pos.x + Math.cos(angle) * dist;
+      enemy.idleWanderTargetY = pos.y + Math.sin(angle) * dist;
+      enemy.idleWanderTimer = 1 + Math.random() * 2;
       this.sprites.push(enemy);
+    }
+
+    // Shooter enemies
+    for (const pos of level.shooters) {
+      const shooter = new Sprite(pos.x, pos.y, SpriteType.SHOOTER, enemyTextures?.[0] ?? null);
+      if (enemyTextures) shooter.textures = enemyTextures;
+      shooter.angleViews = spriteSet.enemyAngleViews;
+      shooter.facingAngle = Math.atan2(this.player.y - pos.y, this.player.x - pos.x);
+      shooter.animationSpeed = 0.4;
+      shooter.corpseTexture = corpseTexture;
+      shooter.aiState = EnemyAIState.IDLE;
+      shooter.alertTimer = 0;
+      shooter.alertFadeoutTimer = 0;
+      shooter.heardGunshotTime = 0;
+      shooter.enemyClass = EnemyClass.SHOOTER;
+      shooter.health = 2;
+      shooter.shooterRange = AI_SHOOTER_RANGE;
+      shooter.shooterMinDist = AI_SHOOTER_MIN_DIST;
+      shooter.shooterCooldown = AI_SHOOTER_COOLDOWN;
+      shooter.shooterDamage = AI_SHOOTER_DAMAGE;
+      shooter.muzzleFlashTimer = 0;
+      const angle = Math.random() * Math.PI * 2;
+      const dist = Math.random() * AI_IDLE_PATROL_RADIUS;
+      shooter.idleWanderTargetX = pos.x + Math.cos(angle) * dist;
+      shooter.idleWanderTargetY = pos.y + Math.sin(angle) * dist;
+      shooter.idleWanderTimer = 1 + Math.random() * 2;
+      this.sprites.push(shooter);
     }
 
     // Ammo
@@ -692,7 +766,7 @@ export class Renderer {
       // Sprite-Textur wählen: Gegner mit angleViews → richtungsabhängig
       let texture: Texture | null = sprite.texture;
       if (
-        sprite.type === SpriteType.ENEMY &&
+        (sprite.type === SpriteType.ENEMY || sprite.type === SpriteType.SHOOTER) &&
         sprite.angleViews.length > 0 &&
         !sprite.isDying &&
         !sprite.isDead
@@ -709,7 +783,7 @@ export class Renderer {
       }
 
       // Corpse rendering: flat, small, anchored to floor — no shadow, no flash, no death-tint
-      if (sprite.type === SpriteType.ENEMY && sprite.isDead && sprite.corpseTexture) {
+      if ((sprite.type === SpriteType.ENEMY || sprite.type === SpriteType.SHOOTER) && sprite.isDead && sprite.corpseTexture) {
         texture = sprite.corpseTexture;
         const fullSpriteHeight = Math.abs(Math.floor(SCREEN_HEIGHT / transformY));
         spriteHeight = fullSpriteHeight * CORPSE_SCALE;
@@ -920,7 +994,7 @@ export class Renderer {
     // Build list of alive enemy obstacles for entity collision
     const enemyObstacles: Array<{ x: number, y: number, radius: number }> = [];
     for (const sprite of this.sprites) {
-      if (sprite.type === SpriteType.ENEMY && sprite.isAlive && !sprite.isDying && !sprite.isDead) {
+      if ((sprite.type === SpriteType.ENEMY || sprite.type === SpriteType.SHOOTER) && sprite.isAlive && !sprite.isDying && !sprite.isDead) {
         enemyObstacles.push({ x: sprite.x, y: sprite.y, radius: ENEMY_RADIUS });
       }
     }
@@ -2029,96 +2103,247 @@ export class Renderer {
   }
 
   /**
-   * Update der Gegner-KI: Chase-Verhalten + Angriff.
-   * - Gegner kollidieren nicht mit Spieler (stoppen bei MIN_ENTITY_DIST).
-   * - Gegner kollidieren nicht mit anderen Gegnern.
-   * - Nach allen Moves: Penetrations-Auflösung (Spieler 70%, Gegner 30%).
+   * Update der Gegner-KI: State Machine (IDLE → ALERT → CHASE).
+   * - IDLE: small patrol wander around spawn, no movement toward player.
+   * - ALERT: stand still, face player, count down alertTimer.
+   * - CHASE: move toward player, attack when in range.
+   * - Lost sight: CHASE → ALERT with fadeout, then ALERT → IDLE if no reacquisition.
+   * - Penetrations-Auflösung (Spieler 70%, Gegner 30%) unchanged.
    */
   private updateEnemyAI(deltaTime: number): void {
     const px = this.player.x;
     const py = this.player.y;
-    const chaseRange = 8.0;
-    const attackRange = MIN_ENTITY_DIST;  // ~0.55 — direkt vor dem Spieler
+    const attackRange = MIN_ENTITY_DIST;
     const chaseSpeed = 1.5;
     const attackDamage = 15;
     const attackCooldown = 1.0;
 
-    // Collect all alive enemies for pairwise collision
     const aliveEnemies = this.sprites.filter(
-      s => s.type === SpriteType.ENEMY && s.isAlive && !s.isDying && !s.isDead
+      s => (s.type === SpriteType.ENEMY || s.type === SpriteType.SHOOTER) && s.isAlive && !s.isDying && !s.isDead
     );
 
     for (const sprite of aliveEnemies) {
       const dx = px - sprite.x;
       const dy = py - sprite.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
+      const angleToPlayer = Math.atan2(dy, dx);
 
-      if (dist > chaseRange) continue;
-
-      // Bei Sicht zum Spieler die Blickrichtung mitführen (außer beim Sterben).
-      sprite.facingAngle = Math.atan2(dy, dx);
-
-      if (dist < attackRange) {
-        // Angriff wenn nah genug
-        if (!sprite.attackTimer) sprite.attackTimer = 0;
-        sprite.attackTimer += deltaTime;
-
-        if (sprite.attackTimer >= attackCooldown) {
-          sprite.attackTimer = 0;
-          this.player.health -= attackDamage;
-          this.triggerDamageFlash();
-        }
-      } else {
-        // Chase: berechne Zielposition
-        const moveX = (dx / dist) * chaseSpeed * deltaTime;
-        const moveY = (dy / dist) * chaseSpeed * deltaTime;
-
-        // Wall collision (Sliding) — use ENEMY_RADIUS
-        let newX = slideAlongX(sprite.x, moveX, sprite.y, ENEMY_RADIUS);
-        let newY = slideAlongY(sprite.y, moveY, newX, ENEMY_RADIUS);
-
-        // Check: would new position overlap with player?
-        if (wouldOverlapEntity(newX, newY, ENEMY_RADIUS,
-          [{ x: px, y: py, radius: PLAYER_RADIUS }])) {
-          // Clamp: stop at MIN_ENTITY_DIST from player
-          const push = resolveEntityCollision(newX, newY, ENEMY_RADIUS, px, py, PLAYER_RADIUS);
-          newX += push.dx;
-          newY += push.dy;
-        }
-
-        // Check: would new position overlap with other enemies?
-        for (const other of aliveEnemies) {
-          if (other === sprite) continue;
-          if (wouldOverlapEntity(newX, newY, ENEMY_RADIUS,
-            [{ x: other.x, y: other.y, radius: ENEMY_RADIUS }])) {
-            const push = resolveEntityCollision(newX, newY, ENEMY_RADIUS,
-              other.x, other.y, ENEMY_RADIUS);
-            newX += push.dx;
-            newY += push.dy;
+      switch (sprite.aiState) {
+        case EnemyAIState.IDLE: {
+          sprite.idleWanderTimer -= deltaTime;
+          if (sprite.idleWanderTimer <= 0) {
+            const wanderAngle = Math.random() * Math.PI * 2;
+            const wanderDist = Math.random() * AI_IDLE_PATROL_RADIUS;
+            sprite.idleWanderTargetX = sprite.spawnX + Math.cos(wanderAngle) * wanderDist;
+            sprite.idleWanderTargetY = sprite.spawnY + Math.sin(wanderAngle) * wanderDist;
+            sprite.idleWanderTimer = 1 + Math.random() * 2;
           }
+
+          const toTargetX = sprite.idleWanderTargetX - sprite.x;
+          const toTargetY = sprite.idleWanderTargetY - sprite.y;
+          const toTargetDist = Math.sqrt(toTargetX * toTargetX + toTargetY * toTargetY);
+
+          if (toTargetDist > 0.2) {
+            const patrolX = (toTargetX / toTargetDist) * chaseSpeed * 0.3 * deltaTime;
+            const patrolY = (toTargetY / toTargetDist) * chaseSpeed * 0.3 * deltaTime;
+            sprite.x = slideAlongX(sprite.x, patrolX, sprite.y, ENEMY_RADIUS);
+            sprite.y = slideAlongY(sprite.y, patrolY, sprite.x, ENEMY_RADIUS);
+            sprite.facingAngle = Math.atan2(toTargetY, toTargetX);
+          }
+
+          if (dist <= AI_AWARENESS_RADIUS && hasLineOfSight(sprite.x, sprite.y, px, py)) {
+            sprite.aiState = EnemyAIState.ALERT;
+            sprite.alertTimer = AI_ALERT_TO_CHASE_DELAY;
+            sprite.facingAngle = angleToPlayer;
+          }
+          break;
         }
 
-        sprite.x = newX;
-        sprite.y = newY;
+        case EnemyAIState.ALERT: {
+          sprite.facingAngle = angleToPlayer;
+
+          if (sprite.alertFadeoutTimer > 0) {
+            sprite.alertFadeoutTimer -= deltaTime;
+            if (sprite.alertFadeoutTimer <= 0) {
+              sprite.aiState = EnemyAIState.IDLE;
+              sprite.alertFadeoutTimer = 0;
+              sprite.alertTimer = 0;
+              break;
+            }
+            if (dist <= AI_AWARENESS_RADIUS && hasLineOfSight(sprite.x, sprite.y, px, py)) {
+              sprite.aiState = EnemyAIState.CHASE;
+              sprite.alertFadeoutTimer = 0;
+              sprite.alertTimer = 0;
+              break;
+            }
+            break;
+          }
+
+          if (dist > AI_AWARENESS_RADIUS || !hasLineOfSight(sprite.x, sprite.y, px, py)) {
+            sprite.alertTimer -= deltaTime;
+          }
+
+          if (sprite.alertTimer <= 0) {
+            sprite.aiState = EnemyAIState.IDLE;
+            sprite.alertTimer = 0;
+          } else if (dist <= AI_AWARENESS_RADIUS && hasLineOfSight(sprite.x, sprite.y, px, py)) {
+            sprite.aiState = EnemyAIState.CHASE;
+            sprite.alertTimer = 0;
+          }
+          break;
+        }
+
+        case EnemyAIState.CHASE: {
+          if (dist > AI_AWARENESS_RADIUS && !hasLineOfSight(sprite.x, sprite.y, px, py)) {
+            sprite.aiState = EnemyAIState.ALERT;
+            sprite.alertFadeoutTimer = AI_CHASE_TO_ALERT_DELAY;
+            sprite.alertTimer = 0;
+            sprite.facingAngle = angleToPlayer;
+            break;
+          }
+
+          sprite.facingAngle = angleToPlayer;
+
+          if (sprite.enemyClass === EnemyClass.SHOOTER) {
+            this.handleShooterChase(sprite, px, py, dist, dx, dy, aliveEnemies, deltaTime);
+          } else {
+            this.handleGruntChase(sprite, px, py, dist, dx, dy, attackRange, attackDamage, attackCooldown, chaseSpeed, aliveEnemies, deltaTime);
+          }
+          break;
+        }
       }
     }
 
     // --- Penetration resolution pass ---
-    // Resolve any remaining overlaps between player and all enemies.
-    // Player gets pushed 70%, enemy gets pushed 30% (player keeps control).
     const entities: Array<{ x: number, y: number, radius: number, weight: number }> = [
       { x: px, y: py, radius: PLAYER_RADIUS, weight: 0.7 },
       ...aliveEnemies.map(s => ({ x: s.x, y: s.y, radius: ENEMY_RADIUS, weight: 0.3 }))
     ];
     resolveAllEntityOverlaps(entities);
 
-    // Write back resolved positions
     this.player.x = entities[0].x;
     this.player.y = entities[0].y;
     for (let i = 0; i < aliveEnemies.length; i++) {
       aliveEnemies[i].x = entities[i + 1].x;
       aliveEnemies[i].y = entities[i + 1].y;
     }
+  }
+
+  private handleGruntChase(
+    sprite: Sprite,
+    px: number, py: number,
+    dist: number, dx: number, dy: number,
+    attackRange: number,
+    attackDamage: number,
+    attackCooldown: number,
+    chaseSpeed: number,
+    aliveEnemies: Sprite[],
+    deltaTime: number
+  ): void {
+    if (dist < attackRange) {
+      if (!sprite.attackTimer) sprite.attackTimer = 0;
+      sprite.attackTimer += deltaTime;
+      if (sprite.attackTimer >= attackCooldown) {
+        sprite.attackTimer = 0;
+        this.player.health -= attackDamage;
+        this.triggerDamageFlash();
+      }
+    } else {
+      const moveX = (dx / dist) * chaseSpeed * deltaTime;
+      const moveY = (dy / dist) * chaseSpeed * deltaTime;
+      let newX = slideAlongX(sprite.x, moveX, sprite.y, ENEMY_RADIUS);
+      let newY = slideAlongY(sprite.y, moveY, newX, ENEMY_RADIUS);
+      if (wouldOverlapEntity(newX, newY, ENEMY_RADIUS,
+        [{ x: px, y: py, radius: PLAYER_RADIUS }])) {
+        const push = resolveEntityCollision(newX, newY, ENEMY_RADIUS, px, py, PLAYER_RADIUS);
+        newX += push.dx;
+        newY += push.dy;
+      }
+      for (const other of aliveEnemies) {
+        if (other === sprite) continue;
+        if (wouldOverlapEntity(newX, newY, ENEMY_RADIUS,
+          [{ x: other.x, y: other.y, radius: ENEMY_RADIUS }])) {
+          const push = resolveEntityCollision(newX, newY, ENEMY_RADIUS,
+            other.x, other.y, ENEMY_RADIUS);
+          newX += push.dx;
+          newY += push.dy;
+        }
+      }
+      sprite.x = newX;
+      sprite.y = newY;
+    }
+  }
+
+  private handleShooterChase(
+    sprite: Sprite,
+    px: number, py: number,
+    dist: number, dx: number, dy: number,
+    aliveEnemies: Sprite[],
+    deltaTime: number
+  ): void {
+    const hasLOS = hasLineOfSight(sprite.x, sprite.y, px, py);
+    const speed = AI_SHOOTER_MOVE_SPEED;
+
+    if (dist < sprite.shooterMinDist) {
+      // Too close — back away
+      const awayX = -(dx / dist) * speed * deltaTime;
+      const awayY = -(dy / dist) * speed * deltaTime;
+      let newX = slideAlongX(sprite.x, awayX, sprite.y, ENEMY_RADIUS);
+      let newY = slideAlongY(sprite.y, awayY, newX, ENEMY_RADIUS);
+      this.applyEntityAvoidance(newX, newY, sprite, px, py, aliveEnemies);
+    } else if (dist > sprite.shooterRange) {
+      // Too far — close in
+      const moveX = (dx / dist) * speed * deltaTime;
+      const moveY = (dy / dist) * speed * deltaTime;
+      let newX = slideAlongX(sprite.x, moveX, sprite.y, ENEMY_RADIUS);
+      let newY = slideAlongY(sprite.y, moveY, newX, ENEMY_RADIUS);
+      this.applyEntityAvoidance(newX, newY, sprite, px, py, aliveEnemies);
+    } else if (hasLOS) {
+      // In optimal range with LOS — shoot
+      if (!sprite.attackTimer) sprite.attackTimer = 0;
+      sprite.attackTimer += deltaTime;
+      if (sprite.attackTimer >= sprite.shooterCooldown) {
+        sprite.attackTimer = 0;
+        this.player.health -= sprite.shooterDamage;
+        this.triggerDamageFlash();
+        sprite.muzzleFlashTimer = 0.2;
+        this.broadcastGunshot();
+      }
+    }
+    // No LOS in range — stay put, don't move
+
+    if (sprite.muzzleFlashTimer > 0) {
+      sprite.muzzleFlashTimer -= deltaTime;
+    }
+  }
+
+  private applyEntityAvoidance(
+    newX: number,
+    newY: number,
+    sprite: Sprite,
+    px: number,
+    py: number,
+    aliveEnemies: Sprite[]
+  ): void {
+    let mx = newX, my = newY;
+    if (wouldOverlapEntity(mx, my, ENEMY_RADIUS,
+      [{ x: px, y: py, radius: PLAYER_RADIUS }])) {
+      const push = resolveEntityCollision(mx, my, ENEMY_RADIUS, px, py, PLAYER_RADIUS);
+      mx += push.dx;
+      my += push.dy;
+    }
+    for (const other of aliveEnemies) {
+      if (other === sprite) continue;
+      if (wouldOverlapEntity(mx, my, ENEMY_RADIUS,
+        [{ x: other.x, y: other.y, radius: ENEMY_RADIUS }])) {
+        const push = resolveEntityCollision(mx, my, ENEMY_RADIUS,
+          other.x, other.y, ENEMY_RADIUS);
+        mx += push.dx;
+        my += push.dy;
+      }
+    }
+    sprite.x = mx;
+    sprite.y = my;
   }
 
   /**
@@ -2224,7 +2449,7 @@ export class Renderer {
           const r = this.rockets[i];
           r.update(deltaTime);
           if (r.isExpired() || positionCollides(r.x, r.y, ROCKET_RADIUS)) {
-            const result = r.explode(this.sprites.filter(s => s.type === SpriteType.ENEMY));
+            const result = r.explode(this.sprites.filter(s => (s.type === SpriteType.ENEMY || s.type === SpriteType.SHOOTER) && s.isAlive && !s.isDying && !s.isDead));
             this.screenShakeTimer = 0.2;
             this.screenShakeIntensity = 12;
             this.damageFlashTimer = this.damageFlashDuration;
@@ -2239,9 +2464,9 @@ export class Renderer {
           }
           // Check direct enemy hit
           for (const sprite of this.sprites) {
-            if (sprite.type === SpriteType.ENEMY && sprite.isAlive && !sprite.isDying && !sprite.isDead) {
+            if ((sprite.type === SpriteType.ENEMY || sprite.type === SpriteType.SHOOTER) && sprite.isAlive && !sprite.isDying && !sprite.isDead) {
               if (r.checkHit(sprite)) {
-                const result = r.explode(this.sprites.filter(s => s.type === SpriteType.ENEMY));
+                const result = r.explode(this.sprites.filter(s => (s.type === SpriteType.ENEMY || s.type === SpriteType.SHOOTER) && s.isAlive && !s.isDying && !s.isDead));
                 this.screenShakeTimer = 0.2;
                 this.screenShakeIntensity = 12;
                 this.damageFlashTimer = this.damageFlashDuration;

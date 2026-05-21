@@ -48,6 +48,7 @@ export interface Level {
   /** Kept for backwards compatibility: points to blueKeycard. */
   keycard: Vec2;
   enemies: Vec2[];
+  shooters: Vec2[];
   ammo: Vec2[];
   health: Vec2[];
   secretHealth: Vec2 | null;
@@ -842,6 +843,9 @@ export function generateLevel(seed: number, stage: number): Level {
     const numEnemies = clamp(12 + Math.floor(stage * 2), 12, 25);
     const enemies: Vec2[] = placeItemsInRooms(map, rooms, excludeSpawnExit, numEnemies, rng, used);
 
+    const numShooters = clamp(Math.floor(stage * 1.2), 0, 8);
+    const shooters: Vec2[] = placeItemsInRooms(map, rooms, excludeSpawnExit, numShooters, rng, used);
+
     const numAmmo = clamp(6 + Math.floor(stage * 1.0), 6, 12);
     const ammo: Vec2[] = placeItemsInRooms(map, rooms, excludeSpawnExit, numAmmo, rng, used);
 
@@ -883,6 +887,7 @@ export function generateLevel(seed: number, stage: number): Level {
       blueKeycard: { x: blueKeycardTile.x + 0.5, y: blueKeycardTile.y + 0.5 },
       keycard: { x: blueKeycardTile.x + 0.5, y: blueKeycardTile.y + 0.5 },
       enemies,
+      shooters,
       ammo,
       health,
       secretHealth,

@@ -5,7 +5,7 @@
 
 import { Player } from '../player/player';
 import { WORLD_MAP, MAP_WIDTH, MAP_HEIGHT, worldState, TILE } from '../engine/world';
-import { Sprite, SpriteType, isCollectableSprite } from '../engine/sprite';
+import { Sprite, SpriteType, isCollectableSprite, EnemyAIState } from '../engine/sprite';
 import { positionCollides, PLAYER_RADIUS, ENEMY_RADIUS } from '../engine/collision';
 
 /**
@@ -83,8 +83,10 @@ export class Minimap {
 
     this.renderMap(ctx, TILE_SIZE, reachable, offsetX, offsetY);
 
+    // Gegner NICHT auf der normalen Minimap anzeigen — das wäre ein Gameplay-Spoiler.
+    // Sie sind nur im Debug-Modus (F1) sichtbar.
     for (const sprite of sprites) {
-      if (sprite.type === SpriteType.ENEMY) continue;
+      if (sprite.type === SpriteType.ENEMY || sprite.type === SpriteType.SHOOTER) continue;
       if (!isCollectableSprite(sprite.type)) continue;
       if (!this.isReachableWorldPosition(sprite.x, sprite.y, reachable)) continue;
       const color =
@@ -133,7 +135,7 @@ export class Minimap {
 
     // Collectable Items (farbig) + Deko (neutral grau)
     for (const sprite of sprites) {
-      if (sprite.type === SpriteType.ENEMY) continue;
+      if (sprite.type === SpriteType.ENEMY || sprite.type === SpriteType.SHOOTER) continue;
       if (!isCollectableSprite(sprite.type)) {
         // Deko-Sprites neutral grau
         this.renderSpriteDot(ctx, sprite.x, sprite.y, tile, offsetX, offsetY, '#888');
@@ -146,18 +148,25 @@ export class Minimap {
       this.renderSpriteDot(ctx, sprite.x, sprite.y, tile, offsetX, offsetY, color);
     }
 
-    // Gegner mit Kollisionskreis
+    // Gegner mit Kollisionskreis und state-based colors
     for (const sprite of sprites) {
-      if (sprite.type !== SpriteType.ENEMY) continue;
+      if (sprite.type !== SpriteType.ENEMY && sprite.type !== SpriteType.SHOOTER) continue;
       if (!sprite.isAlive) continue;
       const ex = sprite.x * tile + offsetX;
       const ey = sprite.y * tile + offsetY;
-      ctx.strokeStyle = 'rgba(255,80,80,0.9)';
+      const isShooter = sprite.type === SpriteType.SHOOTER;
+      const fill = isShooter
+        ? '#c0c'
+        : (sprite.aiState === EnemyAIState.ALERT ? '#ffa500'
+          : sprite.aiState === EnemyAIState.CHASE ? '#f44'
+            : '#667');
+      const strokeColor = isShooter ? 'rgba(180,80,220,0.9)' : 'rgba(255,80,80,0.9)';
+      ctx.strokeStyle = strokeColor;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(ex, ey, ENEMY_RADIUS * tile, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.fillStyle = '#f44';
+      ctx.fillStyle = fill;
       ctx.beginPath();
       ctx.arc(ex, ey, 3, 0, Math.PI * 2);
       ctx.fill();

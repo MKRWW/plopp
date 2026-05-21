@@ -228,6 +228,88 @@ export function wouldOverlapEntity(
 }
 
 /**
+ * Checks if there is an unobstructed line of sight between two world positions.
+ * Uses the DDA algorithm stepping through tiles until the target is reached
+ * or a solid tile is hit.
+ *
+ * @param fromX - X position of the observer
+ * @param fromY - Y position of the observer
+ * @param toX - X position of the target
+ * @param toY - Y position of the target
+ * @returns true if the target is visible (no solid tile blocks the ray)
+ */
+export function hasLineOfSight(
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number
+): boolean {
+  const targetMapX = Math.floor(toX);
+  const targetMapY = Math.floor(toY);
+
+  // Same tile — trivially visible
+  if (Math.floor(fromX) === targetMapX && Math.floor(fromY) === targetMapY) {
+    return true;
+  }
+
+  const dx = toX - fromX;
+  const dy = toY - fromY;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+
+  if (dist < 0.0001) {
+    return true;
+  }
+
+  let mapX = Math.floor(fromX);
+  let mapY = Math.floor(fromY);
+
+  const deltaDistX = Math.abs(1 / (dx || 0.0001));
+  const deltaDistY = Math.abs(1 / (dy || 0.0001));
+
+  let stepX: number;
+  let stepY: number;
+  let sideDistX: number;
+  let sideDistY: number;
+
+  if (dx < 0) {
+    stepX = -1;
+    sideDistX = (fromX - mapX) * deltaDistX;
+  } else {
+    stepX = 1;
+    sideDistX = (mapX + 1.0 - fromX) * deltaDistX;
+  }
+
+  if (dy < 0) {
+    stepY = -1;
+    sideDistY = (fromY - mapY) * deltaDistY;
+  } else {
+    stepY = 1;
+    sideDistY = (mapY + 1.0 - fromY) * deltaDistY;
+  }
+
+  const maxSteps = Math.ceil(dist * 2) + 20;
+  for (let i = 0; i < maxSteps; i++) {
+    if (sideDistX < sideDistY) {
+      sideDistX += deltaDistX;
+      mapX += stepX;
+    } else {
+      sideDistY += deltaDistY;
+      mapY += stepY;
+    }
+
+    if (mapX === targetMapX && mapY === targetMapY) {
+      return true;
+    }
+
+    if (worldState.isSolidTile(mapX, mapY)) {
+      return false;
+    }
+  }
+
+  return false;
+}
+
+/**
  * Resolve all pairwise entity overlaps in a list of entities.
  * Each entity is pushed proportional to its inverse weight (higher weight = pushed less).
  * Pushes are wall-clamped: if a target position would land in a wall, that
