@@ -1,5 +1,9 @@
 # Feature: Alien Enemy Redesign
 
+> **Status**: alle Tasks abgeschlossen und auf `develop` committet (Tasks 1–7 + Orphan-Cleanup).
+> Husk und Spitter sind in allen 8 Winkeln + Corpse-State + Class-Hit-Flash + Idle-Bob implementiert.
+> Diese Datei bleibt als Spec/Art-Direction-Referenz für zukünftige Sprite-Erweiterungen.
+
 ## Problem
 
 Beide Gegner-Klassen (`ENEMY` / Grunt, `SHOOTER`) teilen sich aktuell dieselbe
@@ -126,7 +130,7 @@ export const spitterCorpseTexture: Texture;
 Jede Task ist klein genug für eine Qwen-Session und einen Review. Reihenfolge
 ist linear — spätere Tasks bauen auf früheren auf.
 
-### Task 1: Architektur-Refactor (kein Visual-Change)
+### ✅ Task 1: Architektur-Refactor (kein Visual-Change)
 
 **Goal**: `sprite-textures.ts` so umbauen, dass es **zwei separate** Enemy-Textur-Sets
 liefert, ohne die Optik zu ändern. Beide Sets sind erstmal noch die alte
@@ -138,7 +142,7 @@ Humanoid-Textur — Spitter aber leicht eingefärbt, damit der Wiring-Test sicht
 - Shooters sehen sichtbar anders aus als Grunts (Tönung reicht — Task 4 ersetzt das richtig)
 - `npm test` läuft durch
 
-### Task 2: Husk Front-View
+### ✅ Task 2: Husk Front-View
 
 **Goal**: Front-Pose (3 Frames: idle/walk/attack) durch das neue Husk-Design ersetzen.
 
@@ -147,7 +151,7 @@ Humanoid-Textur — Spitter aber leicht eingefärbt, damit der Wiring-Test sicht
 - Keine humanoiden Reste (kein Mund, keine Zähne, keine Frisur)
 - Attack-Pose: beide Mantis-Arme erkennbar erhoben
 
-### Task 3: Husk übrige Views (Quarter / Side / Back)
+### ✅ Task 3: Husk übrige Views (Quarter / Side / Back)
 
 **Goal**: 4 weitere Winkel-Views, damit die 8-Richtungs-Rotation funktioniert.
 
@@ -156,7 +160,7 @@ Humanoid-Textur — Spitter aber leicht eingefärbt, damit der Wiring-Test sicht
 - Side-View zeigt das digitigrade Bein-Profil
 - Back-View zeigt segmentierte Carapace-Platten von hinten, kein Augen-Band
 
-### Task 4: Spitter Front-View
+### ✅ Task 4: Spitter Front-View
 
 **Goal**: Spitter-Front (3 Frames) implementieren — komplett neu.
 
@@ -166,7 +170,7 @@ Humanoid-Textur — Spitter aber leicht eingefärbt, damit der Wiring-Test sicht
 - Augen-Stiel mit großem Sklera-Auge oben
 - Attack-Pose: Emitter-Orifice glüht giftgelbgrün
 
-### Task 5: Spitter übrige Views
+### ✅ Task 5: Spitter übrige Views
 
 **Goal**: Quarter / Side / Back.
 
@@ -175,7 +179,7 @@ Humanoid-Textur — Spitter aber leicht eingefärbt, damit der Wiring-Test sicht
 - Side-View zeigt nur 2 Beine (das front-center Bein verdeckt das hintere)
 - Back-View hat keinen Augen-Stiel-Fokus (Stiel zeigt nach vorne weg)
 
-### Task 6: Corpses
+### ✅ Task 6: Corpses
 
 **Goal**: Zwei distinkte Leichen-Texturen statt der einen generischen.
 
@@ -184,7 +188,7 @@ Humanoid-Textur — Spitter aber leicht eingefärbt, damit der Wiring-Test sicht
 - Spitter-Corpse: Deflated Blase mit grüner Bio-Pfütze
 - Beide eindeutig als Leiche des jeweiligen Gegners erkennbar
 
-### Task 7: Polish (optional)
+### ✅ Task 7: Polish
 
 **Goal**: Subtile Animations- und Hit-Flash-Politur.
 
