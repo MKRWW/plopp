@@ -41,12 +41,9 @@ export interface SpriteTextureSet {
   spitterAngleViews: Texture[][];
 }
 
-export const huskCorpseTexture = generateCorpseTexture(SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+export const huskCorpseTexture = generateHuskCorpseTexture(SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
 
-export const spitterCorpseTexture = generateTintedCorpseTexture(SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
-
-// @deprecated Use huskCorpseTexture directly. Kept for backward compat until Task 6.
-export const corpseTexture = huskCorpseTexture;
+export const spitterCorpseTexture = generateSpitterCorpseTexture(SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
 
 export function generateSpriteTextures(): SpriteTextureSet {
   const flat = new Map<SpriteType, Texture[]>();
@@ -2570,10 +2567,10 @@ function generateRocketLauncherBack(): Texture {
 }
 
 /* ------------------------------------------------------------------ */
-/* Corpse texture — flat top-down bloodied body                        */
+/* Husk corpse — chitinous pile with a faint cyan eye-band remnant     */
 /* ------------------------------------------------------------------ */
 
-export function generateCorpseTexture(w: number, h: number): Texture {
+export function generateHuskCorpseTexture(w: number, h: number): Texture {
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
@@ -2583,81 +2580,83 @@ export function generateCorpseTexture(w: number, h: number): Texture {
   const cx = w / 2;
   const cy = h / 2;
 
-  // Blood pool — dark reddish-brown ellipse
-  ctx.fillStyle = 'rgba(60, 15, 10, 0.85)';
+  // Floor pool — dark teal, larger and softer than blood
+  ctx.fillStyle = 'rgba(23, 62, 74, 0.5)';  // HUSK_PLATE alpha 0.5
   ctx.beginPath();
-  ctx.ellipse(cx, cy + 2, 24, 28, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx, cy + 4, 28, 8, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Outer blood ring (darker, slightly larger)
-  ctx.strokeStyle = 'rgba(40, 10, 8, 0.4)';
-  ctx.lineWidth = 3;
+  // Pool outer rim — darker
+  ctx.strokeStyle = 'rgba(26, 34, 40, 0.4)';  // HUSK_UNDERSIDE alpha 0.4
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.ellipse(cx, cy + 3, 26, 30, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx, cy + 5, 30, 10, 0, 0, Math.PI * 2);
   ctx.stroke();
 
-  // Body silhouette — elongated blob, head at top, legs at bottom
-  ctx.fillStyle = '#50140f';
+  // Chitin chunk 1 — irregular polygon, biggest, slightly left of center
+  ctx.fillStyle = '#0a0d10';  // HUSK_CARAPACE
   ctx.beginPath();
-  // Head (rounded top)
-  ctx.arc(cx, cy - 10, 9, 0, Math.PI * 2);
+  ctx.moveTo(cx - 10, cy - 4);
+  ctx.lineTo(cx - 4, cy - 6);
+  ctx.lineTo(cx + 2, cy - 5);
+  ctx.lineTo(cx + 4, cy - 1);
+  ctx.lineTo(cx - 2, cy + 2);
+  ctx.lineTo(cx - 8, cy + 1);
+  ctx.closePath();
   ctx.fill();
+  ctx.strokeStyle = '#173e4a';  // HUSK_PLATE rim
+  ctx.lineWidth = 1;
+  ctx.stroke();
 
-  // Torso (widens from head)
+  // Chitin chunk 2 — overlapping chunk 1, right side, slightly higher
+  ctx.fillStyle = '#0a0d10';
   ctx.beginPath();
-  ctx.moveTo(cx - 7, cy - 2);
-  ctx.quadraticCurveTo(cx - 14, cy + 4, cx - 13, cy + 10);
-  ctx.lineTo(cx + 13, cy + 10);
-  ctx.quadraticCurveTo(cx + 14, cy + 4, cx + 7, cy - 2);
+  ctx.moveTo(cx, cy - 2);
+  ctx.lineTo(cx + 8, cy - 4);
+  ctx.lineTo(cx + 12, cy);
+  ctx.lineTo(cx + 10, cy + 4);
+  ctx.lineTo(cx + 3, cy + 5);
+  ctx.lineTo(cx - 1, cy + 2);
+  ctx.closePath();
   ctx.fill();
+  ctx.strokeStyle = '#173e4a';
+  ctx.lineWidth = 1;
+  ctx.stroke();
 
-  // Arms — splayed out to sides
-  ctx.fillStyle = '#50140f';
+  // Chitin chunk 3 — smaller, bottom, partly in pool
+  ctx.fillStyle = '#0a0d10';
   ctx.beginPath();
-  ctx.moveTo(cx - 7, cy);
-  ctx.quadraticCurveTo(cx - 18, cy - 4, cx - 22, cy + 2);
-  ctx.quadraticCurveTo(cx - 24, cy + 6, cx - 18, cy + 8);
-  ctx.quadraticCurveTo(cx - 14, cy + 4, cx - 7, cy + 6);
+  ctx.moveTo(cx - 6, cy + 6);
+  ctx.lineTo(cx, cy + 5);
+  ctx.lineTo(cx + 5, cy + 8);
+  ctx.lineTo(cx + 2, cy + 11);
+  ctx.lineTo(cx - 4, cy + 10);
+  ctx.closePath();
   ctx.fill();
+  ctx.strokeStyle = '#173e4a';
+  ctx.lineWidth = 1;
+  ctx.stroke();
 
-  ctx.beginPath();
-  ctx.moveTo(cx + 7, cy);
-  ctx.quadraticCurveTo(cx + 18, cy - 4, cx + 22, cy + 2);
-  ctx.quadraticCurveTo(cx + 24, cy + 6, cx + 18, cy + 8);
-  ctx.quadraticCurveTo(cx + 14, cy + 4, cx + 7, cy + 6);
-  ctx.fill();
+  // Faint cyan eye-band remnant — short streak across chunk 1
+  ctx.fillStyle = 'rgba(28, 74, 85, 0.55)';  // HUSK_EYE_DIM alpha 0.55
+  ctx.fillRect(cx - 5, cy - 3, 7, 1);
 
-  // Legs — slightly separated, ending in feet
-  ctx.fillStyle = '#401008';
-  ctx.beginPath();
-  ctx.moveTo(cx - 6, cy + 10);
-  ctx.quadraticCurveTo(cx - 9, cy + 20, cx - 10, cy + 26);
-  ctx.quadraticCurveTo(cx - 12, cy + 30, cx - 6, cy + 32);
-  ctx.quadraticCurveTo(cx - 2, cy + 32, cx - 2, cy + 28);
-  ctx.quadraticCurveTo(cx - 3, cy + 22, cx - 3, cy + 10);
-  ctx.fill();
-
-  ctx.beginPath();
-  ctx.moveTo(cx + 3, cy + 10);
-  ctx.quadraticCurveTo(cx + 4, cy + 20, cx + 7, cy + 26);
-  ctx.quadraticCurveTo(cx + 9, cy + 30, cx + 13, cy + 28);
-  ctx.quadraticCurveTo(cx + 14, cy + 24, cx + 11, cy + 20);
-  ctx.quadraticCurveTo(cx + 9, cy + 14, cx + 7, cy + 10);
-  ctx.fill();
-
-  // Darker shading in center
-  ctx.fillStyle = 'rgba(40, 8, 5, 0.3)';
-  ctx.beginPath();
-  ctx.ellipse(cx, cy + 5, 10, 12, 0, 0, Math.PI * 2);
-  ctx.fill();
+  // Scattered chitin splinters — small 2x2 fragments around the pile
+  ctx.fillStyle = '#0a0d10';
+  ctx.fillRect(cx - 14, cy + 2, 2, 2);
+  ctx.fillRect(cx - 11, cy + 7, 2, 1);
+  ctx.fillRect(cx + 13, cy - 3, 2, 2);
+  ctx.fillRect(cx + 12, cy + 7, 1, 2);
+  ctx.fillRect(cx + 7, cy - 8, 2, 1);
 
   return texFromCanvas(canvas, ctx);
 }
 
-/* Spitter corpse — same as Husk but with violet multiply tint         */
+/* ------------------------------------------------------------------ */
+/* Spitter corpse — deflated bulb in a sickly green bio puddle         */
 /* ------------------------------------------------------------------ */
 
-export function generateTintedCorpseTexture(w: number, h: number): Texture {
+export function generateSpitterCorpseTexture(w: number, h: number): Texture {
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
@@ -2667,79 +2666,99 @@ export function generateTintedCorpseTexture(w: number, h: number): Texture {
   const cx = w / 2;
   const cy = h / 2;
 
-  // Blood pool — dark reddish-brown ellipse
-  ctx.fillStyle = 'rgba(60, 15, 10, 0.85)';
+  // Bio puddle — bigger and brighter than the Husk pool
+  ctx.fillStyle = 'rgba(200, 224, 64, 0.6)';  // SPITTER_BIO alpha 0.6
   ctx.beginPath();
-  ctx.ellipse(cx, cy + 2, 24, 28, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx, cy + 5, 32, 10, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Outer blood ring (darker, slightly larger)
-  ctx.strokeStyle = 'rgba(40, 10, 8, 0.4)';
-  ctx.lineWidth = 3;
+  // Puddle inner darker zone
+  ctx.fillStyle = 'rgba(90, 102, 24, 0.45)';  // SPITTER_EMITTER alpha 0.45
   ctx.beginPath();
-  ctx.ellipse(cx, cy + 3, 26, 30, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx, cy + 6, 22, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Deflated thorax silhouette — bauchige Blase, einseitig konkav
+  ctx.fillStyle = '#1a0f1f';  // SPITTER_FLESH
+  ctx.beginPath();
+  ctx.moveTo(cx - 12, cy - 4);
+  ctx.quadraticCurveTo(cx - 16, cy + 2, cx - 10, cy + 6);
+  // Concave dent on the right (deflated side)
+  ctx.quadraticCurveTo(cx - 2, cy + 3, cx + 4, cy + 6);
+  ctx.quadraticCurveTo(cx + 12, cy + 5, cx + 14, cy);
+  ctx.quadraticCurveTo(cx + 10, cy - 6, cx + 2, cy - 7);
+  ctx.quadraticCurveTo(cx - 8, cy - 8, cx - 12, cy - 4);
+  ctx.closePath();
+  ctx.fill();
+
+  // Highlight on the upper-left of the deflated bulb (gradient feel)
+  ctx.fillStyle = '#3b1d4a';  // SPITTER_FLESH_LIT
+  ctx.beginPath();
+  ctx.ellipse(cx - 4, cy - 3, 7, 3, -0.4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Concave dent shadow — darker inside the collapsed area
+  ctx.fillStyle = 'rgba(7, 4, 16, 0.6)';  // SPITTER_SHADOW alpha 0.6
+  ctx.beginPath();
+  ctx.ellipse(cx + 1, cy + 2, 5, 2, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Bio splatter droplets — scattered around the puddle
+  ctx.fillStyle = '#c8e040';  // SPITTER_BIO
+  ctx.beginPath();
+  ctx.arc(cx - 18, cy + 1, 1.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx - 22, cy + 8, 1, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx + 18, cy + 9, 1.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx + 22, cy + 2, 1, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx - 8, cy + 12, 1, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx + 6, cy + 13, 1.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Detached eye stalk — lying sideways top-left of the bulb
+  ctx.strokeStyle = '#3b1d4a';  // SPITTER_FLESH_LIT
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx - 18, cy - 10);
+  ctx.lineTo(cx - 10, cy - 8);
+  ctx.stroke();
+  ctx.lineWidth = 1;
+
+  // Sclera at the stalk end — half-closed, no iris (lifeless)
+  ctx.fillStyle = '#d8c7b5';  // SPITTER_EYE_WHITE
+  ctx.beginPath();
+  ctx.arc(cx - 19, cy - 10, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Faint eyelid suggestion — dark line across the sclera
+  ctx.strokeStyle = '#1a0a0a';  // SPITTER_EYE_IRIS
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cx - 21, cy - 10);
+  ctx.lineTo(cx - 17, cy - 10);
   ctx.stroke();
 
-  // Body silhouette — elongated blob, head at top, legs at bottom
-  ctx.fillStyle = '#50140f';
+  // Knocked-off legs — 2 thin dark strokes near the bottom
+  ctx.strokeStyle = '#15090d';  // SPITTER_LEG
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  // Head (rounded top)
-  ctx.arc(cx, cy - 10, 9, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Torso (widens from head)
+  ctx.moveTo(cx + 14, cy + 10);
+  ctx.lineTo(cx + 22, cy + 14);
+  ctx.stroke();
   ctx.beginPath();
-  ctx.moveTo(cx - 7, cy - 2);
-  ctx.quadraticCurveTo(cx - 14, cy + 4, cx - 13, cy + 10);
-  ctx.lineTo(cx + 13, cy + 10);
-  ctx.quadraticCurveTo(cx + 14, cy + 4, cx + 7, cy - 2);
-  ctx.fill();
-
-  // Arms — splayed out to sides
-  ctx.fillStyle = '#50140f';
-  ctx.beginPath();
-  ctx.moveTo(cx - 7, cy);
-  ctx.quadraticCurveTo(cx - 18, cy - 4, cx - 22, cy + 2);
-  ctx.quadraticCurveTo(cx - 24, cy + 6, cx - 18, cy + 8);
-  ctx.quadraticCurveTo(cx - 14, cy + 4, cx - 7, cy + 6);
-  ctx.fill();
-
-  ctx.beginPath();
-  ctx.moveTo(cx + 7, cy);
-  ctx.quadraticCurveTo(cx + 18, cy - 4, cx + 22, cy + 2);
-  ctx.quadraticCurveTo(cx + 24, cy + 6, cx + 18, cy + 8);
-  ctx.quadraticCurveTo(cx + 14, cy + 4, cx + 7, cy + 6);
-  ctx.fill();
-
-  // Legs — slightly separated, ending in feet
-  ctx.fillStyle = '#401008';
-  ctx.beginPath();
-  ctx.moveTo(cx - 6, cy + 10);
-  ctx.quadraticCurveTo(cx - 9, cy + 20, cx - 10, cy + 26);
-  ctx.quadraticCurveTo(cx - 12, cy + 30, cx - 6, cy + 32);
-  ctx.quadraticCurveTo(cx - 2, cy + 32, cx - 2, cy + 28);
-  ctx.quadraticCurveTo(cx - 3, cy + 22, cx - 3, cy + 10);
-  ctx.fill();
-
-  ctx.beginPath();
-  ctx.moveTo(cx + 3, cy + 10);
-  ctx.quadraticCurveTo(cx + 4, cy + 20, cx + 7, cy + 26);
-  ctx.quadraticCurveTo(cx + 9, cy + 30, cx + 13, cy + 28);
-  ctx.quadraticCurveTo(cx + 14, cy + 24, cx + 11, cy + 20);
-  ctx.quadraticCurveTo(cx + 9, cy + 14, cx + 7, cy + 10);
-  ctx.fill();
-
-  // Darker shading in center
-  ctx.fillStyle = 'rgba(40, 8, 5, 0.3)';
-  ctx.beginPath();
-  ctx.ellipse(cx, cy + 5, 10, 12, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Violet tint layer
-  ctx.globalCompositeOperation = 'multiply';
-  ctx.fillStyle = '#9966cc';
-  ctx.fillRect(0, 0, w, h);
-  ctx.globalCompositeOperation = 'source-over';
+  ctx.moveTo(cx - 14, cy + 11);
+  ctx.lineTo(cx - 20, cy + 15);
+  ctx.stroke();
+  ctx.lineWidth = 1;
 
   return texFromCanvas(canvas, ctx);
 }
