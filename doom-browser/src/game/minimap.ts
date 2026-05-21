@@ -86,7 +86,7 @@ export class Minimap {
     // Gegner NICHT auf der normalen Minimap anzeigen — das wäre ein Gameplay-Spoiler.
     // Sie sind nur im Debug-Modus (F1) sichtbar.
     for (const sprite of sprites) {
-      if (sprite.type === SpriteType.ENEMY || sprite.type === SpriteType.SHOOTER) continue;
+      if (sprite.isEnemy) continue;
       if (!isCollectableSprite(sprite.type)) continue;
       if (!this.isReachableWorldPosition(sprite.x, sprite.y, reachable)) continue;
       const color =
@@ -135,7 +135,7 @@ export class Minimap {
 
     // Collectable Items (farbig) + Deko (neutral grau)
     for (const sprite of sprites) {
-      if (sprite.type === SpriteType.ENEMY || sprite.type === SpriteType.SHOOTER) continue;
+      if (sprite.isEnemy) continue;
       if (!isCollectableSprite(sprite.type)) {
         // Deko-Sprites neutral grau
         this.renderSpriteDot(ctx, sprite.x, sprite.y, tile, offsetX, offsetY, '#888');
@@ -150,17 +150,20 @@ export class Minimap {
 
     // Gegner mit Kollisionskreis und state-based colors
     for (const sprite of sprites) {
-      if (sprite.type !== SpriteType.ENEMY && sprite.type !== SpriteType.SHOOTER) continue;
+      if (!sprite.isEnemy) continue;
       if (!sprite.isAlive) continue;
       const ex = sprite.x * tile + offsetX;
       const ey = sprite.y * tile + offsetY;
       const isShooter = sprite.type === SpriteType.SHOOTER;
+      const isLatcher = sprite.type === SpriteType.LATCHER;
       const fill = isShooter
         ? '#c0c'
-        : (sprite.aiState === EnemyAIState.ALERT ? '#ffa500'
-          : sprite.aiState === EnemyAIState.CHASE ? '#f44'
-            : '#667');
-      const strokeColor = isShooter ? 'rgba(180,80,220,0.9)' : 'rgba(255,80,80,0.9)';
+        : isLatcher
+          ? '#f7c'
+          : (sprite.aiState === EnemyAIState.ALERT ? '#ffa500'
+            : sprite.aiState === EnemyAIState.CHASE ? '#f44'
+              : '#667');
+      const strokeColor = isShooter ? 'rgba(180,80,220,0.9)' : isLatcher ? 'rgba(255,100,180,0.9)' : 'rgba(255,80,80,0.9)';
       ctx.strokeStyle = strokeColor;
       ctx.lineWidth = 2;
       ctx.beginPath();

@@ -353,7 +353,7 @@ export class Renderer {
     const py = this.player.y;
 
     for (const sprite of this.sprites) {
-      if (sprite.type !== SpriteType.ENEMY && sprite.type !== SpriteType.SHOOTER) continue;
+      if (!sprite.isEnemy) continue;
       if (!sprite.isAlive || sprite.isDying || sprite.isDead) continue;
 
       const dx = px - sprite.x;
@@ -452,7 +452,7 @@ export class Renderer {
     let closestDist = Infinity;
 
     for (const sprite of this.sprites) {
-      if (sprite.type !== SpriteType.ENEMY && sprite.type !== SpriteType.SHOOTER) continue;
+      if (!sprite.isEnemy) continue;
       if (sprite.isDying || sprite.isDead) continue;
 
       // Vektor vom Spieler zum Sprite
@@ -792,7 +792,7 @@ export class Renderer {
     for (const sprite of this.sprites) {
       // Floating-Offset für Items (Schweben) bzw. subtiler Idle-Bob für Gegner.
       let floatingOffset = sprite.getFloatingOffset();
-      if ((sprite.type === SpriteType.ENEMY || sprite.type === SpriteType.SHOOTER) && sprite.isAlive) {
+      if ((sprite.isEnemy) && sprite.isAlive) {
         floatingOffset += Math.sin(sprite.floatingPhase) * 0.02;
       }
 
@@ -851,7 +851,7 @@ export class Renderer {
       // Sprite-Textur wählen: Gegner mit angleViews → richtungsabhängig
       let texture: Texture | null = sprite.texture;
       if (
-        (sprite.type === SpriteType.ENEMY || sprite.type === SpriteType.SHOOTER) &&
+        (sprite.isEnemy) &&
         sprite.angleViews.length > 0 &&
         !sprite.isDying &&
         !sprite.isDead
@@ -868,7 +868,7 @@ export class Renderer {
       }
 
       // Corpse rendering: flat, small, anchored to floor — no shadow, no flash, no death-tint
-      if ((sprite.type === SpriteType.ENEMY || sprite.type === SpriteType.SHOOTER) && sprite.isDead && sprite.corpseTexture) {
+      if ((sprite.isEnemy) && sprite.isDead && sprite.corpseTexture) {
         texture = sprite.corpseTexture;
         const fullSpriteHeight = Math.abs(Math.floor(SCREEN_HEIGHT / transformY));
         spriteHeight = fullSpriteHeight * CORPSE_SCALE;
@@ -1297,7 +1297,7 @@ export class Renderer {
     // Build list of alive enemy obstacles for entity collision
     const enemyObstacles: Array<{ x: number, y: number, radius: number }> = [];
     for (const sprite of this.sprites) {
-      if ((sprite.type === SpriteType.ENEMY || sprite.type === SpriteType.SHOOTER) && sprite.isAlive && !sprite.isDying && !sprite.isDead) {
+      if ((sprite.isEnemy) && sprite.isAlive && !sprite.isDying && !sprite.isDead) {
         enemyObstacles.push({ x: sprite.x, y: sprite.y, radius: ENEMY_RADIUS });
       }
     }
@@ -2448,7 +2448,7 @@ export class Renderer {
     const attackCooldown = 1.0;
 
     const aliveEnemies = this.sprites.filter(
-      s => (s.type === SpriteType.ENEMY || s.type === SpriteType.SHOOTER) && s.isAlive && !s.isDying && !s.isDead
+      s => (s.isEnemy) && s.isAlive && !s.isDying && !s.isDead
     );
 
     for (const sprite of aliveEnemies) {
@@ -2901,7 +2901,7 @@ export class Renderer {
           const r = this.rockets[i];
           r.update(deltaTime);
           if (r.isExpired() || positionCollides(r.x, r.y, ROCKET_RADIUS)) {
-            const result = r.explode(this.sprites.filter(s => (s.type === SpriteType.ENEMY || s.type === SpriteType.SHOOTER) && s.isAlive && !s.isDying && !s.isDead));
+            const result = r.explode(this.sprites.filter(s => (s.isEnemy) && s.isAlive && !s.isDying && !s.isDead));
             this.screenShakeTimer = 0.2;
             this.screenShakeIntensity = 12;
             this.damageFlashTimer = this.damageFlashDuration;
@@ -2916,9 +2916,9 @@ export class Renderer {
           }
           // Check direct enemy hit
           for (const sprite of this.sprites) {
-            if ((sprite.type === SpriteType.ENEMY || sprite.type === SpriteType.SHOOTER) && sprite.isAlive && !sprite.isDying && !sprite.isDead) {
+            if ((sprite.isEnemy) && sprite.isAlive && !sprite.isDying && !sprite.isDead) {
               if (r.checkHit(sprite)) {
-                const result = r.explode(this.sprites.filter(s => (s.type === SpriteType.ENEMY || s.type === SpriteType.SHOOTER) && s.isAlive && !s.isDying && !s.isDead));
+                const result = r.explode(this.sprites.filter(s => (s.isEnemy) && s.isAlive && !s.isDying && !s.isDead));
                 this.screenShakeTimer = 0.2;
                 this.screenShakeIntensity = 12;
                 this.damageFlashTimer = this.damageFlashDuration;
