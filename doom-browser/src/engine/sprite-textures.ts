@@ -14,6 +14,18 @@ const HUSK_EYE_HOT   = '#7be8f8';
 const HUSK_BLADE     = '#2b2f33';
 const HUSK_BLADE_LIT = '#4d575e';
 
+const SPITTER_SHADOW     = '#070410';
+const SPITTER_FLESH      = '#1a0f1f';
+const SPITTER_FLESH_LIT  = '#3b1d4a';
+const SPITTER_FLESH_RIM  = '#7a3a8a';
+const SPITTER_LEG        = '#15090d';
+const SPITTER_LEG_LIT    = '#2a161b';
+const SPITTER_EYE_WHITE  = '#d8c7b5';
+const SPITTER_EYE_IRIS   = '#1a0a0a';
+const SPITTER_EMITTER    = '#5a6618';
+const SPITTER_BIO        = '#c8e040';
+const SPITTER_BIO_HOT    = '#f4ff8a';
+
 type EnemyPose = 'idle' | 'walk' | 'attack';
 type EnemyView = 'front' | 'frontQuarter' | 'side' | 'backQuarter' | 'back';
 
@@ -175,7 +187,7 @@ function generateSpitterTexture(pose: EnemyPose, view: EnemyView, mirror: boolea
 
   switch (view) {
     case 'front':
-      drawEnemyFront(ctx, cx, headY, torsoY, attacking, legKick, armSwing);
+      drawSpitterFront(ctx, pose);
       break;
     case 'frontQuarter':
       drawEnemyQuarter(ctx, cx, headY, torsoY, attacking, legKick, armSwing, /*back*/ false);
@@ -191,13 +203,15 @@ function generateSpitterTexture(pose: EnemyPose, view: EnemyView, mirror: boolea
       break;
   }
 
-  applySpriteRimLight(ctx, view);
+  if (view !== 'front') {
+    applySpriteRimLight(ctx, view);
 
-  // Violet tint layer over the base sprite
-  ctx.globalCompositeOperation = 'multiply';
-  ctx.fillStyle = '#9966cc';
-  ctx.fillRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
-  ctx.globalCompositeOperation = 'source-over';
+    // Violet tint layer over the base sprite
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = '#9966cc';
+    ctx.fillRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+    ctx.globalCompositeOperation = 'source-over';
+  }
 
   if (mirror) {
     return mirrorTextureHorizontal(canvas);
@@ -448,6 +462,214 @@ function drawHuskEyeBand(ctx: CanvasRenderingContext2D, pose: EnemyPose): void {
 
   // Always reset shadow
   ctx.shadowBlur = 0;
+}
+
+/* ----- Spitter Front view (tripod alien) ----- */
+
+function drawSpitterFront(ctx: CanvasRenderingContext2D, pose: EnemyPose): void {
+  drawSpitterShadow(ctx);
+  drawSpitterTripodLegs(ctx, pose);
+  drawSpitterThorax(ctx, pose);
+  drawSpitterEmitterArm(ctx, pose);
+  drawSpitterEyeStalk(ctx, pose);
+}
+
+function drawSpitterShadow(ctx: CanvasRenderingContext2D): void {
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  ctx.fillStyle = SPITTER_SHADOW;
+  ctx.beginPath();
+  ctx.ellipse(32, 60, 14, 2, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawSpitterTripodLeg(ctx: CanvasRenderingContext2D, hipX: number, hipY: number, footX: number, footY: number): void {
+  const kneeY = hipY + (footY - hipY) * 0.5;
+  const kneeX = hipX + (footX - hipX) * 0.5;
+
+  // Upper segment
+  ctx.strokeStyle = SPITTER_LEG;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(hipX, hipY);
+  ctx.lineTo(kneeX, kneeY);
+  ctx.stroke();
+
+  // Lower segment
+  ctx.beginPath();
+  ctx.moveTo(kneeX, kneeY);
+  ctx.lineTo(footX, footY);
+  ctx.stroke();
+
+  // Outer-edge highlight
+  ctx.strokeStyle = SPITTER_LEG_LIT;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(hipX + (footX < hipX ? -1 : 1), hipY);
+  ctx.lineTo(footX + (footX < hipX ? -1 : 1), footY);
+  ctx.stroke();
+
+  ctx.lineWidth = 1;
+}
+
+function drawSpitterTripodLegs(ctx: CanvasRenderingContext2D, pose: EnemyPose): void {
+  const cx = 32;
+
+  let blHipX: number, blHipY: number, blFootX: number, blFootY: number;
+  let brHipX: number, brHipY: number, brFootX: number, brFootY: number;
+  let fcHipX: number, fcHipY: number, fcFootX: number, fcFootY: number;
+
+  if (pose === 'walk') {
+    // Front-center leg lifted 2px
+    blHipX = cx - 10; blHipY = 36;  blFootX = cx - 12; blFootY = 58;
+    brHipX = cx + 10; brHipY = 36;  brFootX = cx + 12; brFootY = 58;
+    fcHipX = cx;      fcHipY = 36;  fcFootX = cx;      fcFootY = 57;
+  } else if (pose === 'attack') {
+    // All legs in standard fixed position
+    blHipX = cx - 10; blHipY = 36;  blFootX = cx - 12; blFootY = 58;
+    brHipX = cx + 10; brHipY = 36;  brFootX = cx + 12; brFootY = 58;
+    fcHipX = cx;      fcHipY = 38;  fcFootX = cx;      fcFootY = 59;
+  } else {
+    // idle — standard tripod
+    blHipX = cx - 10; blHipY = 36;  blFootX = cx - 12; blFootY = 58;
+    brHipX = cx + 10; brHipY = 36;  brFootX = cx + 12; brFootY = 58;
+    fcHipX = cx;      fcHipY = 38;  fcFootX = cx;      fcFootY = 59;
+  }
+
+  // Back legs first (drawn behind), then front leg (foreground)
+  drawSpitterTripodLeg(ctx, blHipX, blHipY, blFootX, blFootY);
+  drawSpitterTripodLeg(ctx, brHipX, brHipY, brFootX, brFootY);
+  drawSpitterTripodLeg(ctx, fcHipX, fcHipY, fcFootX, fcFootY);
+}
+
+function drawSpitterThorax(ctx: CanvasRenderingContext2D, pose: EnemyPose): void {
+  const cx = 32;
+
+  const top = pose === 'attack' ? 11 : 12;
+  const bottom = pose === 'attack' ? 37 : 36;
+  const midW = pose === 'attack' ? 15 : 14;
+  const topW = pose === 'attack' ? 7 : 6;
+  const bottomW = pose === 'attack' ? 10 : 9;
+
+  // Base fill
+  ctx.fillStyle = SPITTER_FLESH;
+  ctx.beginPath();
+  ctx.moveTo(cx, top);
+  ctx.quadraticCurveTo(cx - midW, (top + 24) / 2, cx - midW, 24);
+  ctx.quadraticCurveTo(cx - midW, (24 + bottom) / 2, cx - bottomW, bottom);
+  ctx.quadraticCurveTo(cx, bottom + 2, cx + bottomW, bottom);
+  ctx.quadraticCurveTo(cx + midW, (bottom + 24) / 2, cx + midW, 24);
+  ctx.quadraticCurveTo(cx + midW, (24 + top) / 2, cx + topW, top);
+  ctx.quadraticCurveTo(cx, top - 2, cx, top);
+  ctx.fill();
+
+  // Gradient overlay
+  const grad = ctx.createLinearGradient(cx, top, cx, bottom);
+  grad.addColorStop(0, SPITTER_FLESH_LIT);
+  grad.addColorStop(1, SPITTER_FLESH);
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(cx, top);
+  ctx.quadraticCurveTo(cx - midW, (top + 24) / 2, cx - midW, 24);
+  ctx.quadraticCurveTo(cx - midW, (24 + bottom) / 2, cx - bottomW, bottom);
+  ctx.quadraticCurveTo(cx, bottom + 2, cx + bottomW, bottom);
+  ctx.quadraticCurveTo(cx + midW, (bottom + 24) / 2, cx + midW, 24);
+  ctx.quadraticCurveTo(cx + midW, (24 + top) / 2, cx + topW, top);
+  ctx.quadraticCurveTo(cx, top - 2, cx, top);
+  ctx.fill();
+
+  // Rim highlight top-right
+  ctx.strokeStyle = SPITTER_FLESH_RIM;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx + 8, 14);
+  ctx.lineTo(cx + 12, 22);
+  ctx.stroke();
+  ctx.lineWidth = 1;
+}
+
+function drawSpitterEmitterArm(ctx: CanvasRenderingContext2D, pose: EnemyPose): void {
+  const cx = 32;
+
+  // Arm path: start → knee → end (orifice)
+  ctx.strokeStyle = SPITTER_FLESH;
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(cx + 12, 28);
+  ctx.quadraticCurveTo(cx + 16, 36, cx + 18, 44);
+  ctx.stroke();
+
+  // Top-edge highlight
+  ctx.strokeStyle = SPITTER_FLESH_RIM;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cx + 10, 27);
+  ctx.quadraticCurveTo(cx + 14, 35, cx + 16, 43);
+  ctx.stroke();
+
+  // Orifice at end
+  if (pose === 'attack') {
+    ctx.shadowColor = SPITTER_BIO_HOT;
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = SPITTER_BIO_HOT;
+    ctx.beginPath();
+    ctx.arc(cx + 18, 44, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  } else {
+    ctx.fillStyle = SPITTER_EMITTER;
+    ctx.beginPath();
+    ctx.arc(cx + 18, 44, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Bio droplet in center
+    ctx.fillStyle = SPITTER_BIO;
+    ctx.beginPath();
+    ctx.arc(cx + 18, 44, 1, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawSpitterEyeStalk(ctx: CanvasRenderingContext2D, pose: EnemyPose): void {
+  const cx = 32;
+
+  // Stalk from thorax top to eye base
+  ctx.strokeStyle = SPITTER_FLESH_LIT;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx, 12);
+  ctx.lineTo(cx, 4);
+  ctx.stroke();
+  ctx.lineWidth = 1;
+
+  // Eye at top of stalk
+  let irisY: number;
+  let scleraR: number;
+
+  if (pose === 'idle') {
+    irisY = 4;
+    scleraR = 2.5;
+  } else if (pose === 'walk') {
+    irisY = 5;
+    scleraR = 2.5;
+  } else {
+    // attack — eye wide open
+    irisY = 6;
+    scleraR = 3;
+  }
+
+  // Sclera
+  ctx.fillStyle = SPITTER_EYE_WHITE;
+  ctx.beginPath();
+  ctx.arc(cx, 4, scleraR, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Iris
+  ctx.fillStyle = SPITTER_EYE_IRIS;
+  ctx.beginPath();
+  ctx.arc(cx, irisY, 1, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 /* ----- Husk Quarter / Side / Back views ----- */
