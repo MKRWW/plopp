@@ -30,3 +30,13 @@ Thumbs.db
 .continue/sessions/
 .continue/dev_data/
 .continue/logs/
+
+# AI scratch / review / task artifacts (transient, not needed for operation)
+REVIEW.md
+REVIEW_SUMMARY*.txt
+REVIEW_SUMMARY*.md
+CODE_REVIEW*.md
+TASK[0-9]*_*.md
+TASK[0-9]*_*.txt
+FIX_PLAN.md
+IMPLEMENTATION_REPORT*.md
