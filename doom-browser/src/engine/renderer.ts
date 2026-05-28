@@ -6,6 +6,25 @@ import { TextureManager, Texture } from './textures';
 import { Sprite, SpriteType, generateSpriteTextures, EnemyAIState, EnemyClass, AI_IDLE_PATROL_RADIUS, AI_SHOOTER_RANGE, AI_SHOOTER_MIN_DIST, AI_SHOOTER_COOLDOWN, AI_SHOOTER_DAMAGE, LatcherState } from './sprite';
 import { updateEnemyAI, broadcastGunshot, type AIContext } from './enemy-ai';
 import { handlePlayerShoot, updateRockets, updateBioProjectiles, type CombatContext } from './combat';
+import {
+  createEffectsState,
+  spawnBlood,
+  updateBloodParticles,
+  updateHeartbeat,
+  updateEffectTimers,
+  updateHeadbobAndShake,
+  renderBloodParticles,
+  renderBioProjectiles,
+  renderRockets,
+  drawDamageFlash,
+  drawLowHealthVignette,
+  drawHitMarker,
+  drawWallImpact,
+  HIT_MARKER_DURATION,
+  WALL_IMPACT_DURATION,
+  type EffectsContext,
+  type EffectsState,
+} from './effects';
 import { huskCorpseTexture, spitterCorpseTexture, SpriteTextureSet } from './sprite-textures';
 import { GameState, GameStateManager } from '../game/state';
 import { Weapon, WeaponState } from '../game/weapon';
@@ -53,8 +72,10 @@ export class Renderer {
   private fpsTimer: number = 0;
   private readonly fpsInterval: number = 0.5; // update FPS every 500ms
 
-  // Sprint-Status für HUD
-  private isSprinting: boolean = false;
+  // Effects: blood, overlays, heartbeat, headbob, screen-shake, damage flash,
+  // hit-marker, wall-impact. Grouped into a single object so the effects
+  // module can mutate timers by reference.
+  private effectsState: EffectsState = createEffectsState();
 
   // Keycard state
   private hasYellowKeycard: boolean = false;
@@ -73,26 +94,8 @@ export class Renderer {
   // Pointer Lock verfügbar?
   private pointerLockAvailable: boolean;
 
-  // Damage-Feedback Timer (rote Bildschirmränder)
-  private damageFlashTimer: number = 0;
-  private readonly damageFlashDuration: number = 0.3; // 300ms
-
   // Muzzle-Flash-Textur (prozedural generiert)
   private muzzleFlashTexture: Texture | null = null;
-
-  // Screen Shake
-  private screenShakeTimer: number = 0;
-  private screenShakeIntensity: number = 0;
-
-  // Hit Feedback (Hitmarker in Bildschirmmitte)
-  private hitMarkerTimer: number = 0;
-  private readonly hitMarkerDuration: number = 0.15;
-
-  // Wall Impact Sparks (screen-space)
-  private wallImpactTimer: number = 0;
-  private readonly wallImpactDuration: number = 0.2;
-  private wallImpactX: number = 0;
-  private wallImpactY: number = 0;
 
   // Phase 8: Minimap & Sound
   private minimap: Minimap;
@@ -106,17 +109,6 @@ export class Renderer {
   private rockets: RocketProjectile[] = [];
   private bioProjectiles: BioProjectile[] = [];
   private bloodParticles: BloodParticle[] = [];
-
-  // Headbob: phase ticks while moving, intensity fades in/out for smoothness.
-  private headbobPhase: number = 0;
-  private headbobIntensity: number = 0;
-
-  // Low-health heartbeat: timer counts until next pulse, pulseTimer fades the
-  // visual vignette out after each pulse. Both run only when health < threshold.
-  private heartbeatTimer: number = 0;
-  private heartbeatPulseTimer: number = 0;
-  private readonly LOW_HEALTH_THRESHOLD: number = 25;
-  private readonly HEARTBEAT_PULSE_DURATION: number = 0.45;
 
   // Ammo-low warning: edge-triggered when current weapon ammo drops at or
   // below LOW_AMMO_THRESHOLD. Auto-resets when ammo climbs back up (pickup
@@ -307,7 +299,7 @@ export class Renderer {
    * Setzt Damage-Flash-Timer (wird vom HUD gerendert).
    */
   public triggerDamageFlash(): void {
-    this.damageFlashTimer = this.damageFlashDuration;
+    this.effectsState.damageFlashTimer = this.effectsState.damageFlashDuration;
     // Sound: Damage
     this.soundManager.play(SoundType.DAMAGE);
   }
@@ -333,20 +325,32 @@ export class Renderer {
       triggerDamageFlash: () => this.triggerDamageFlash(),
       broadcastGunshot: () => broadcastGunshot(this.aiCtx()),
       triggerScreenShake: (intensity, duration) => {
-        this.screenShakeTimer = duration;
-        this.screenShakeIntensity = intensity;
+        this.effectsState.screenShakeTimer = duration;
+        this.effectsState.screenShakeIntensity = intensity;
       },
       setWallImpact: (x, y) => {
-        this.wallImpactX = x;
-        this.wallImpactY = y;
-        this.wallImpactTimer = this.wallImpactDuration;
+        this.effectsState.wallImpactX = x;
+        this.effectsState.wallImpactY = y;
+        this.effectsState.wallImpactTimer = WALL_IMPACT_DURATION;
       },
       setHitMarker: () => {
-        this.hitMarkerTimer = this.hitMarkerDuration;
+        this.effectsState.hitMarkerTimer = HIT_MARKER_DURATION;
       },
       flashCameraNoSound: () => {
-        this.damageFlashTimer = this.damageFlashDuration;
+        this.effectsState.damageFlashTimer = this.effectsState.damageFlashDuration;
       },
+    };
+  }
+
+  private effectsCtx(): EffectsContext {
+    return {
+      ctx: this.ctx,
+      player: this.player,
+      zBuffer: this.zBuffer,
+      soundManager: this.soundManager,
+      bloodParticles: this.bloodParticles,
+      bioProjectiles: this.bioProjectiles,
+      rockets: this.rockets,
     };
   }
 
@@ -823,211 +827,6 @@ export class Renderer {
   }
 
   /**
-   * Spawn a burst of blood/gore droplets from a sprite that just transitioned
-   * into the dying state. Color is class-specific: cyan-teal for the Husk
-   * (chitin ichor), bio-green for the Spitter, dark red as fallback.
-   */
-  private spawnBloodAt(sprite: Sprite): void {
-    let color: string;
-    if (sprite.type === SpriteType.ENEMY) {
-      color = '173e4a';        // HUSK_PLATE
-    } else if (sprite.type === SpriteType.SHOOTER) {
-      color = 'c8e040';        // SPITTER_BIO
-    } else {
-      color = '7a0a0a';        // generic red
-    }
-
-    const count = 14;
-    for (let i = 0; i < count; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const speed = 0.8 + Math.random() * 1.6;
-      const vx = Math.cos(angle) * speed;
-      const vy = Math.sin(angle) * speed;
-      // Initial upward kick + variance — droplets arc above and fall back.
-      const vz = 1.2 + Math.random() * 1.8;
-      const z = 0.15 + Math.random() * 0.15;
-      const life = 0.7 + Math.random() * 0.6;
-      this.bloodParticles.push(new BloodParticle(sprite.x, sprite.y, z, vx, vy, vz, life, color));
-    }
-  }
-
-  /**
-   * Render blood/gore droplets after the main sprite pass. Each particle is
-   * projected with the same camera math as sprites, depth-tested against the
-   * z-buffer at its screen column, and drawn as a small colored square that
-   * fades with its remaining life.
-   */
-  private renderBloodParticles(): void {
-    if (this.bloodParticles.length === 0) return;
-
-    const dirX = this.player.dirX;
-    const dirY = this.player.dirY;
-    const planeX = this.player.planeX;
-    const planeY = this.player.planeY;
-    const px = this.player.x;
-    const py = this.player.y;
-    const invDet = 1.0 / (planeX * dirY - dirX * planeY);
-
-    for (const p of this.bloodParticles) {
-      const spriteX = p.x - px;
-      const spriteY = p.y - py;
-      const transformX = invDet * (dirY * spriteX - dirX * spriteY);
-      const transformY = invDet * (-planeY * spriteX + planeX * spriteY);
-
-      if (transformY <= 0.1) continue;
-
-      const screenX = Math.floor((SCREEN_WIDTH / 2) * (1 + transformX / transformY));
-      if (screenX < 0 || screenX >= SCREEN_WIDTH) continue;
-      if (this.zBuffer.get(screenX) < transformY) continue;
-
-      // Z (world up/down) maps to vertical screen offset around mid-height,
-      // scaled by inverse depth so further droplets visually drop slower.
-      const screenY = Math.floor(SCREEN_HEIGHT / 2 - (p.z * SCREEN_HEIGHT) / transformY);
-      const size = Math.max(1, Math.floor(4 / transformY));
-      this.ctx.fillStyle = `rgba(${parseInt(p.color.slice(0, 2), 16)},${parseInt(p.color.slice(2, 4), 16)},${parseInt(p.color.slice(4, 6), 16)},${p.alpha})`;
-      this.ctx.fillRect(screenX - Math.floor(size / 2), screenY - Math.floor(size / 2), size, size);
-    }
-  }
-
-  /**
-   * Render flying rockets as a small fire-glow head with a 5-sample backward
-   * trail so the launcher's projectile is actually visible mid-flight.
-   * Trail positions are computed from the rocket's direction so no per-rocket
-   * trail state has to be kept.
-   */
-  private renderRockets(): void {
-    if (this.rockets.length === 0) return;
-
-    const dirX = this.player.dirX;
-    const dirY = this.player.dirY;
-    const planeX = this.player.planeX;
-    const planeY = this.player.planeY;
-    const px = this.player.x;
-    const py = this.player.y;
-    const invDet = 1.0 / (planeX * dirY - dirX * planeY);
-
-    for (const rocket of this.rockets) {
-      const TRAIL_SAMPLES = 5;
-      const TRAIL_STEP = 0.18;  // tiles between samples
-
-      // Render trail back-to-front (oldest first, so head ends up on top).
-      for (let i = TRAIL_SAMPLES; i >= 0; i--) {
-        const wx = rocket.x - rocket.dirX * TRAIL_STEP * i;
-        const wy = rocket.y - rocket.dirY * TRAIL_STEP * i;
-        const spriteX = wx - px;
-        const spriteY = wy - py;
-        const transformX = invDet * (dirY * spriteX - dirX * spriteY);
-        const transformY = invDet * (-planeY * spriteX + planeX * spriteY);
-        if (transformY <= 0.1) continue;
-
-        const screenX = Math.floor((SCREEN_WIDTH / 2) * (1 + transformX / transformY));
-        if (screenX < 0 || screenX >= SCREEN_WIDTH) continue;
-        if (this.zBuffer.get(screenX) < transformY) continue;
-
-        const screenY = Math.floor(SCREEN_HEIGHT / 2 - 8 / transformY);
-        const baseRadius = Math.max(2, Math.min(22, 12 / transformY));
-        const t = 1 - i / TRAIL_SAMPLES; // 1 at head, 0 at tail
-
-        if (i === 0) {
-          // Head: bright fire glow.
-          this.ctx.fillStyle = 'rgba(120, 30, 10, 0.45)';
-          this.ctx.beginPath();
-          this.ctx.arc(screenX, screenY, baseRadius * 1.7, 0, Math.PI * 2);
-          this.ctx.fill();
-          this.ctx.fillStyle = 'rgba(255, 120, 30, 0.9)';
-          this.ctx.beginPath();
-          this.ctx.arc(screenX, screenY, baseRadius, 0, Math.PI * 2);
-          this.ctx.fill();
-          this.ctx.fillStyle = 'rgba(255, 230, 140, 1)';
-          this.ctx.beginPath();
-          this.ctx.arc(screenX, screenY, baseRadius * 0.45, 0, Math.PI * 2);
-          this.ctx.fill();
-        } else {
-          // Smoke / fading flame trail samples.
-          const alpha = t * 0.55;
-          const radius = baseRadius * (0.7 + t * 0.6);
-          this.ctx.fillStyle = `rgba(80, 60, 50, ${alpha * 0.7})`;
-          this.ctx.beginPath();
-          this.ctx.arc(screenX, screenY, radius * 1.2, 0, Math.PI * 2);
-          this.ctx.fill();
-          this.ctx.fillStyle = `rgba(200, 90, 30, ${alpha})`;
-          this.ctx.beginPath();
-          this.ctx.arc(screenX, screenY, radius * 0.6, 0, Math.PI * 2);
-          this.ctx.fill();
-        }
-      }
-    }
-  }
-
-  /**
-   * Render visual-only Spitter bio projectiles after the main sprite pass.
-   * Each projectile is drawn as a stack of three radial fills (halo + body
-   * + hot core) and depth-tested against the z-buffer at its screen column.
-   */
-  private renderBioProjectiles(): void {
-    if (this.bioProjectiles.length === 0) return;
-
-    const dirX = this.player.dirX;
-    const dirY = this.player.dirY;
-    const planeX = this.player.planeX;
-    const planeY = this.player.planeY;
-    const px = this.player.x;
-    const py = this.player.y;
-    const invDet = 1.0 / (planeX * dirY - dirX * planeY);
-
-    for (const proj of this.bioProjectiles) {
-      const spriteX = proj.x - px;
-      const spriteY = proj.y - py;
-      const transformX = invDet * (dirY * spriteX - dirX * spriteY);
-      const transformY = invDet * (-planeY * spriteX + planeX * spriteY);
-
-      if (transformY <= 0.1) continue;
-
-      const screenX = Math.floor((SCREEN_WIDTH / 2) * (1 + transformX / transformY));
-      if (screenX < 0 || screenX >= SCREEN_WIDTH) continue;
-
-      // Z-buffer test at the projectile's screen column — hides it behind walls.
-      if (this.zBuffer.get(screenX) < transformY) continue;
-
-      // Sprites use mid-screen as the horizontal axis; projectile sits slightly
-      // above mid-height to suggest emitter level.
-      const screenY = Math.floor(SCREEN_HEIGHT / 2 - 8 / transformY);
-      const baseRadius = Math.max(2, Math.min(28, 14 / transformY));
-
-      if (proj.isSplatting) {
-        const fade = proj.splatTimer / proj.splatDuration;
-        // Splat: bigger spread, fades alpha
-        this.ctx.fillStyle = `rgba(90, 102, 24, ${0.35 * fade})`;
-        this.ctx.beginPath();
-        this.ctx.arc(screenX, screenY, baseRadius * 2.4, 0, Math.PI * 2);
-        this.ctx.fill();
-        this.ctx.fillStyle = `rgba(200, 224, 64, ${0.7 * fade})`;
-        this.ctx.beginPath();
-        this.ctx.arc(screenX, screenY, baseRadius * 1.2, 0, Math.PI * 2);
-        this.ctx.fill();
-        this.ctx.fillStyle = `rgba(244, 255, 138, ${0.9 * fade})`;
-        this.ctx.beginPath();
-        this.ctx.arc(screenX, screenY, baseRadius * 0.5, 0, Math.PI * 2);
-        this.ctx.fill();
-      } else {
-        // In-flight glob: outer halo, bright body, hot core.
-        this.ctx.fillStyle = 'rgba(90, 102, 24, 0.35)';
-        this.ctx.beginPath();
-        this.ctx.arc(screenX, screenY, baseRadius * 1.7, 0, Math.PI * 2);
-        this.ctx.fill();
-        this.ctx.fillStyle = 'rgba(200, 224, 64, 0.85)';
-        this.ctx.beginPath();
-        this.ctx.arc(screenX, screenY, baseRadius * 0.9, 0, Math.PI * 2);
-        this.ctx.fill();
-        this.ctx.fillStyle = 'rgba(244, 255, 138, 1)';
-        this.ctx.beginPath();
-        this.ctx.arc(screenX, screenY, baseRadius * 0.4, 0, Math.PI * 2);
-        this.ctx.fill();
-      }
-    }
-  }
-
-  /**
    * Pause-Overlay für Pointer-Lock-Verlust.
    */
   private createPauseOverlay(): void {
@@ -1092,8 +891,8 @@ export class Renderer {
    */
   private updatePlayer(deltaTime: number): void {
     // Sprint-Status prüfen
-    this.isSprinting = this.input.isSprinting();
-    const currentSpeed = this.isSprinting
+    this.effectsState.isSprinting = this.input.isSprinting();
+    const currentSpeed = this.effectsState.isSprinting
       ? MOVE_SPEED * SPRINT_MULTIPLIER
       : MOVE_SPEED;
 
@@ -1996,7 +1795,7 @@ export class Renderer {
     ctx.fillText(`KILLS: ${this.inventory.kills}`, w - 20, 45);
 
     // --- Sprint-Indikator ---
-    if (this.isSprinting) {
+    if (this.effectsState.isSprinting) {
       ctx.textAlign = 'center';
       ctx.font = 'bold 16px monospace';
       ctx.fillStyle = '#ff0';
@@ -2116,101 +1915,6 @@ export class Renderer {
   }
 
   /**
-   * Zeichnet den Damage-Flash (rote Bildschirmränder).
-   */
-  /**
-   * Red radial vignette that pulses on heartbeat when player.health is below
-   * LOW_HEALTH_THRESHOLD. Drawn before drawDamageFlash so the damage flash
-   * still overrides on direct hits.
-   */
-  private drawLowHealthVignette(): void {
-    if (this.player.health <= 0 || this.player.health >= this.LOW_HEALTH_THRESHOLD) return;
-
-    const severity = 1 - this.player.health / this.LOW_HEALTH_THRESHOLD; // 0..1
-    const baseAlpha = 0.15 + severity * 0.25;
-    const pulseAlpha = (this.heartbeatPulseTimer / this.HEARTBEAT_PULSE_DURATION) * 0.35;
-    const alpha = Math.min(0.9, baseAlpha + pulseAlpha);
-
-    const cx = SCREEN_WIDTH / 2;
-    const cy = SCREEN_HEIGHT / 2;
-    const innerR = Math.min(SCREEN_WIDTH, SCREEN_HEIGHT) * 0.25;
-    const outerR = Math.sqrt(cx * cx + cy * cy);
-
-    const grad = this.ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR);
-    grad.addColorStop(0, 'rgba(120, 0, 0, 0)');
-    grad.addColorStop(0.6, `rgba(150, 0, 0, ${alpha * 0.4})`);
-    grad.addColorStop(1, `rgba(180, 0, 0, ${alpha})`);
-    this.ctx.fillStyle = grad;
-    this.ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-  }
-
-  private drawDamageFlash(): void {
-    if (this.damageFlashTimer <= 0) return;
-
-    const intensity = this.damageFlashTimer / this.damageFlashDuration;
-    const alpha = intensity * 0.5;
-    const border = 40;
-
-    this.ctx.fillStyle = `rgba(255, 0, 0, ${alpha})`;
-
-    // Oben
-    this.ctx.fillRect(0, 0, SCREEN_WIDTH, border);
-    // Unten
-    this.ctx.fillRect(0, SCREEN_HEIGHT - border, SCREEN_WIDTH, border);
-    // Links
-    this.ctx.fillRect(0, 0, border, SCREEN_HEIGHT);
-    // Rechts
-    this.ctx.fillRect(SCREEN_WIDTH - border, 0, border, SCREEN_HEIGHT);
-  }
-
-  /**
-   * Zeichnet den Hitmarker (kurzes Kreuz in Bildschirmmitte).
-   */
-  private drawHitMarker(): void {
-    if (this.hitMarkerTimer <= 0) return;
-
-    const intensity = this.hitMarkerTimer / this.hitMarkerDuration;
-    const alpha = intensity;
-    const cx = SCREEN_WIDTH / 2;
-    const cy = SCREEN_HEIGHT / 2;
-    const size = 8;
-
-    this.ctx.strokeStyle = `rgba(255, 255, 200, ${alpha})`;
-    this.ctx.lineWidth = 2;
-
-    // Kleines X-Kreuz
-    this.ctx.beginPath();
-    this.ctx.moveTo(cx - size, cy - size);
-    this.ctx.lineTo(cx + size, cy + size);
-    this.ctx.moveTo(cx + size, cy - size);
-    this.ctx.lineTo(cx - size, cy + size);
-    this.ctx.stroke();
-  }
-
-  /**
-   * Zeichnet einen kurzen Impact-Funken am Wand-Trefferpunkt.
-   */
-  private drawWallImpact(): void {
-    if (this.wallImpactTimer <= 0) return;
-
-    const intensity = this.wallImpactTimer / this.wallImpactDuration;
-    const alpha = intensity;
-    const sparkSize = 6 * intensity;
-
-    // Gelb/orange Funken
-    this.ctx.fillStyle = `rgba(255, 200, 50, ${alpha})`;
-    this.ctx.beginPath();
-    this.ctx.arc(this.wallImpactX, this.wallImpactY, sparkSize, 0, Math.PI * 2);
-    this.ctx.fill();
-
-    // Helle Mitte
-    this.ctx.fillStyle = `rgba(255, 255, 200, ${alpha * 0.8})`;
-    this.ctx.beginPath();
-    this.ctx.arc(this.wallImpactX, this.wallImpactY, sparkSize * 0.4, 0, Math.PI * 2);
-    this.ctx.fill();
-  }
-
-  /**
    * Reset des Spiels nach Tod: neuer Basis-Seed + frisches Stage 1.
    * Jeder Run hat dadurch eine andere Level-Sequenz.
    */
@@ -2230,7 +1934,7 @@ export class Renderer {
     this.player.score = 0;
 
     this.weapon.reset();
-    this.damageFlashTimer = 0;
+    this.effectsState.damageFlashTimer = 0;
     this.hasYellowKeycard = false;
     this.hasBlueKeycard = false;
     this.keycardPickupMessage = 0;
@@ -2367,7 +2071,7 @@ export class Renderer {
           // Spawn blood splatter on the alive → dying transition (any source).
           if (sprite.isDying && !sprite.bloodSpawned) {
             sprite.bloodSpawned = true;
-            this.spawnBloodAt(sprite);
+            spawnBlood(this.effectsCtx(), sprite);
           }
 
           // Death-Animation: Timer herunterzählen und in Corpse-Status übergehen.
@@ -2381,11 +2085,7 @@ export class Renderer {
         }
 
         // Blood particles: advance ballistic motion, cull expired.
-        for (let i = this.bloodParticles.length - 1; i >= 0; i--) {
-          if (this.bloodParticles[i].update(deltaTime)) {
-            this.bloodParticles.splice(i, 1);
-          }
-        }
+        updateBloodParticles(this.effectsCtx(), deltaTime);
 
         // Ammo-low warning: edge-trigger one beep when ammo drops at or below
         // threshold for the active weapon. Reset once ammo climbs back up.
@@ -2400,21 +2100,7 @@ export class Renderer {
         // Low-health heartbeat: only active below threshold. Pulse rate scales
         // with how low health is — faster (and louder visually) the closer to
         // dying you are.
-        if (this.player.health > 0 && this.player.health < this.LOW_HEALTH_THRESHOLD) {
-          const severity = 1 - this.player.health / this.LOW_HEALTH_THRESHOLD; // 0..1
-          const pulseInterval = 1.0 - severity * 0.5; // 1.0 s → 0.5 s
-          this.heartbeatTimer += deltaTime;
-          if (this.heartbeatTimer >= pulseInterval) {
-            this.heartbeatTimer = 0;
-            this.heartbeatPulseTimer = this.HEARTBEAT_PULSE_DURATION;
-            this.soundManager.play(SoundType.HEARTBEAT);
-          }
-        } else {
-          this.heartbeatTimer = 0;
-        }
-        if (this.heartbeatPulseTimer > 0) {
-          this.heartbeatPulseTimer -= deltaTime;
-        }
+        updateHeartbeat(this.effectsCtx(), this.effectsState, deltaTime, true);
 
         // Gegner-KI updaten (Chase + Angriff)
         updateEnemyAI(this.aiCtx(), deltaTime);
@@ -2463,25 +2149,8 @@ export class Renderer {
       // Sie laufen auch während PAUSED weiter, damit Overlays (Pause,
       // Schaden, Hitmarker) visuell flüssig bleiben.
 
-      // Damage-Flash-Timer
-      if (this.damageFlashTimer > 0) {
-        this.damageFlashTimer -= deltaTime;
-      }
-
-      // Screen Shake Timer
-      if (this.screenShakeTimer > 0) {
-        this.screenShakeTimer -= deltaTime;
-      }
-
-      // Hit Marker Timer
-      if (this.hitMarkerTimer > 0) {
-        this.hitMarkerTimer -= deltaTime;
-      }
-
-      // Wall Impact Timer
-      if (this.wallImpactTimer > 0) {
-        this.wallImpactTimer -= deltaTime;
-      }
+      // Effects: tick damage-flash, screen-shake, hit-marker, wall-impact timers
+      updateEffectTimers(this.effectsState, deltaTime);
 
       // Keycard Pickup Message Timer
       if (this.keycardPickupMessage > 0) {
@@ -2518,27 +2187,12 @@ export class Renderer {
         this.input.isForward() || this.input.isBackward() ||
         this.input.isStrafeLeft() || this.input.isStrafeRight()
       );
-      const sprintFactor = this.isSprinting ? 1.4 : 1.0;
-      this.headbobPhase += deltaTime * 8 * sprintFactor;
-      if (isMovingNow) {
-        this.headbobIntensity = Math.min(1, this.headbobIntensity + deltaTime * 4);
-      } else {
-        this.headbobIntensity = Math.max(0, this.headbobIntensity - deltaTime * 6);
-      }
-      const bobY = Math.sin(this.headbobPhase) * 2.5 * this.headbobIntensity * sprintFactor;
-      const bobX = Math.sin(this.headbobPhase * 0.5) * 1.2 * this.headbobIntensity * sprintFactor;
+      const { translateX, translateY } = updateHeadbobAndShake(this.effectsState, deltaTime, isMovingNow);
 
       // Screen Shake + Headbob: Canvas transform anwenden
       this.ctx.save();
-      let shakeX = 0;
-      let shakeY = 0;
-      if (this.screenShakeTimer > 0) {
-        const shakeIntensity = this.screenShakeIntensity * (this.screenShakeTimer / 0.12);
-        shakeX = (Math.random() - 0.5) * shakeIntensity * 2;
-        shakeY = (Math.random() - 0.5) * shakeIntensity * 2;
-      }
-      if (shakeX !== 0 || shakeY !== 0 || bobX !== 0 || bobY !== 0) {
-        this.ctx.translate(shakeX + bobX, shakeY + bobY);
+      if (translateX !== 0 || translateY !== 0) {
+        this.ctx.translate(translateX, translateY);
       }
 
       // LOADING: render loading screen, skip gameplay rendering
@@ -2549,18 +2203,19 @@ export class Renderer {
         this.drawFloorAndCeiling();
         this.castRays();
         this.renderSprites();
-        this.renderBloodParticles();
-        this.renderBioProjectiles();
-        this.renderRockets();
+        const effectsCtx = this.effectsCtx();
+        renderBloodParticles(effectsCtx);
+        renderBioProjectiles(effectsCtx);
+        renderRockets(effectsCtx);
 
         // Weapon nur im Spiel rendern
         if (gameState === GameState.PLAYING || gameState === GameState.PAUSED) {
           this.drawWeapon();
           this.drawHUD();
-          this.drawLowHealthVignette();
-          this.drawDamageFlash();
-          this.drawHitMarker();
-          this.drawWallImpact();
+          drawLowHealthVignette(effectsCtx, this.effectsState);
+          drawDamageFlash(effectsCtx, this.effectsState);
+          drawHitMarker(effectsCtx, this.effectsState);
+          drawWallImpact(effectsCtx, this.effectsState);
 
           // Phase 8: Minimap rendern (Debug-Modus: vergrößert + Kollisions-Overlay)
           this.minimap.render(this.player, this.sprites);
