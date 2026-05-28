@@ -19,6 +19,12 @@ export class BioProjectile {
   public lifetime: number;
   public age: number = 0;
 
+  /** Damage to apply on player collision. Default 0 (visual-only). */
+  public damage: number = 0;
+
+  /** Prevents applying damage more than once (e.g. projectile lingers on player). */
+  public hasDamaged: boolean = false;
+
   /** Splat phase counts down once the glob has hit or expired. */
   public splatTimer: number = 0;
   public readonly splatDuration: number = 0.18;
@@ -29,7 +35,8 @@ export class BioProjectile {
     dirX: number,
     dirY: number,
     speed: number = 18,
-    lifetime: number = 0.4
+    lifetime: number = 0.4,
+    damage: number = 0
   ) {
     this.x = x;
     this.y = y;
@@ -37,6 +44,7 @@ export class BioProjectile {
     this.dirY = dirY;
     this.speed = speed;
     this.lifetime = lifetime;
+    this.damage = damage;
   }
 
   /**

@@ -253,10 +253,29 @@ export function updateRockets(ctx: CombatContext, deltaTime: number): void {
 
 /**
  * Bio-Projectile-Update-Loop: nur Position und Splat-Effekte updaten.
+ * Boss-volley projectilies mit damage > 0 apply damage on player collision.
  */
 export function updateBioProjectiles(ctx: CombatContext, deltaTime: number): void {
+  const px = ctx.player.x;
+  const py = ctx.player.y;
+
   for (let i = ctx.bioProjectiles.length - 1; i >= 0; i--) {
-    if (ctx.bioProjectiles[i].update(deltaTime)) {
+    const proj = ctx.bioProjectiles[i];
+
+    // Boss-volley projectiles that can damage the player.
+    if (proj.damage > 0 && !proj.hasDamaged && !proj.isSplatting) {
+      const pdx = px - proj.x;
+      const pdy = py - proj.y;
+      const pDist = Math.sqrt(pdx * pdx + pdy * pdy);
+      if (pDist < 0.5) {
+        ctx.player.health -= proj.damage;
+        ctx.triggerDamageFlash();
+        proj.hasDamaged = true;
+        proj.triggerSplat();
+      }
+    }
+
+    if (proj.update(deltaTime)) {
       ctx.bioProjectiles.splice(i, 1);
     }
   }

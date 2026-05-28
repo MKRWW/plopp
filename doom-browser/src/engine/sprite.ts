@@ -94,11 +94,27 @@ export const AI_BOSS_ATTACK_RANGE = 0.8;         // tiles, close-range melee
 export const AI_BOSS_ATTACK_DAMAGE = 25;         // per hit
 export const AI_BOSS_ATTACK_COOLDOWN = 1.5;      // seconds between attacks
 
+/** Boss phase-specific constants (Task 3). */
+export const BOSS_VOLLEY_COOLDOWN = 2.0;         // seconds between volleys
+export const BOSS_VOLLEY_FAN_DEG = 30;           // total fan width in degrees
+export const BOSS_VOLLEY_DAMAGE = 12;            // per projectile that lands on player
+export const BOSS_VOLLEY_PROJECTILE_SPEED = 14;
+export const BOSS_VOLLEY_PROJECTILE_LIFE = 1.2;
+export const BOSS_RAGE_SPEED_MULTIPLIER = 2.0;
+export const BOSS_RAGE_DAMAGE_MULTIPLIER = 1.25;
+
 export enum LatcherState {
   APPROACH = 'approach',
   WINDUP = 'windup',
   LEAP = 'leap',
   RECOVER = 'recover'
+}
+
+/** Boss phase state machine (driven by HP thresholds — see enemy-ai.ts). */
+export enum BossPhase {
+  MELEE = 'melee',
+  VOLLEY = 'volley',
+  RAGE = 'rage'
 }
 
 export class Sprite {
@@ -182,6 +198,11 @@ export class Sprite {
   // Idle voice cooldown: seconds until next class-specific idle sound.
   // Counts down while in IDLE state. Starts randomized 3–6 s.
   public idleSoundCooldown: number = (Math.random() * 3) + 3;
+
+  // Boss-specific fields (only meaningful for EnemyClass.BOSS)
+  public bossPhase: BossPhase = BossPhase.MELEE;
+  public bossVolleyTimer: number = 0;
+  public bossRageActivated: boolean = false;
 
   constructor(x: number, y: number, type: SpriteType, texture: Texture | null = null) {
     this.x = x;

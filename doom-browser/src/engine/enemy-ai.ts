@@ -2,6 +2,7 @@ import {
   Sprite,
   EnemyAIState,
   EnemyClass,
+  BossPhase,
   AI_IDLE_PATROL_RADIUS,
   AI_AWARENESS_RADIUS,
   AI_GUNSHOT_RADIUS,
@@ -18,9 +19,17 @@ import {
   AI_LATCHER_DAMAGE,
   AI_LATCHER_CONTACT_RADIUS,
   AI_BOSS_SPEED,
+  AI_BOSS_HP,
   AI_BOSS_ATTACK_RANGE,
   AI_BOSS_ATTACK_DAMAGE,
   AI_BOSS_ATTACK_COOLDOWN,
+  BOSS_VOLLEY_COOLDOWN,
+  BOSS_VOLLEY_FAN_DEG,
+  BOSS_VOLLEY_DAMAGE,
+  BOSS_VOLLEY_PROJECTILE_SPEED,
+  BOSS_VOLLEY_PROJECTILE_LIFE,
+  BOSS_RAGE_SPEED_MULTIPLIER,
+  BOSS_RAGE_DAMAGE_MULTIPLIER,
 } from './sprite';
 import { Player } from '../player/player';
 import { BioProjectile } from './bio-projectile';
@@ -235,10 +244,15 @@ function handleGruntChase(
 }
 
 /**
- * Boss chase: scaled-up Husk-style melee. Slower base speed, longer reach,
- * heavier damage, longer cooldown. Task 3 replaces this with HP-driven phases
- * (MELEE / VOLLEY / RAGE); Task 2 ships the placeholder so spawning, hit-flash,
- * corpse and death-anim are exercised end-to-end first.
+ * Boss chase: three-phase state machine driven by HP thresholds.
+ *
+ * Phase transitions (one-shot, latched):
+ *  - MELEE  → VOLLEY when hpPct <= 0.5 (50% HP)
+ *  - VOLLEY → RAGE   when hpPct <= 0.2 (20% HP)
+ *
+ * MELEE: Husk-style melee chase (base speed, damage, cooldown).
+ * VOLLEY: Stationary, fires 3-projectile fans every BOSS_VOLLEY_COOLDOWN.
+ * RAGE:   Like MELEE but with 2× speed and 1.25× damage.
  */
 function handleBossChase(
   ctx: AIContext,
@@ -248,17 +262,64 @@ function handleBossChase(
   aliveEnemies: Sprite[],
   deltaTime: number
 ): void {
+  const hpPct = sprite.health / AI_BOSS_HP;
+
+  // --- One-shot phase transitions ---
+  if (hpPct <= 0.2 && !sprite.bossRageActivated) {
+    sprite.bossPhase = BossPhase.RAGE;
+    sprite.bossRageActivated = true;
+  } else if (hpPct <= 0.5 && sprite.bossPhase === BossPhase.MELEE) {
+    sprite.bossPhase = BossPhase.VOLLEY;
+    sprite.bossVolleyTimer = BOSS_VOLLEY_COOLDOWN;
+  }
+
+  // --- Phase-specific behaviour ---
+  switch (sprite.bossPhase) {
+    case BossPhase.MELEE: {
+      handleBossMelee(ctx, sprite, px, py, dist, dx, dy, aliveEnemies, deltaTime,
+        AI_BOSS_SPEED, AI_BOSS_ATTACK_DAMAGE);
+      break;
+    }
+
+    case BossPhase.VOLLEY: {
+      handleBossVolley(ctx, sprite, px, py, dist, dx, dy, deltaTime);
+      break;
+    }
+
+    case BossPhase.RAGE: {
+      handleBossMelee(ctx, sprite, px, py, dist, dx, dy, aliveEnemies, deltaTime,
+        AI_BOSS_SPEED * BOSS_RAGE_SPEED_MULTIPLIER,
+        AI_BOSS_ATTACK_DAMAGE * BOSS_RAGE_DAMAGE_MULTIPLIER);
+      break;
+    }
+  }
+}
+
+/**
+ * Boss melee behaviour (used by both MELEE and RAGE phases).
+ * Husk-style chase with configurable speed and damage.
+ */
+function handleBossMelee(
+  ctx: AIContext,
+  sprite: Sprite,
+  px: number, py: number,
+  dist: number, dx: number, dy: number,
+  aliveEnemies: Sprite[],
+  deltaTime: number,
+  speed: number,
+  damage: number
+): void {
   if (dist < AI_BOSS_ATTACK_RANGE) {
     if (!sprite.attackTimer) sprite.attackTimer = 0;
     sprite.attackTimer += deltaTime;
     if (sprite.attackTimer >= AI_BOSS_ATTACK_COOLDOWN) {
       sprite.attackTimer = 0;
-      ctx.player.health -= AI_BOSS_ATTACK_DAMAGE;
+      ctx.player.health -= damage;
       ctx.triggerDamageFlash();
     }
   } else {
-    const moveX = (dx / dist) * AI_BOSS_SPEED * deltaTime;
-    const moveY = (dy / dist) * AI_BOSS_SPEED * deltaTime;
+    const moveX = (dx / dist) * speed * deltaTime;
+    const moveY = (dy / dist) * speed * deltaTime;
     let newX = slideAlongX(sprite.x, moveX, sprite.y, ENEMY_RADIUS);
     let newY = slideAlongY(sprite.y, moveY, newX, ENEMY_RADIUS);
     if (wouldOverlapEntity(newX, newY, ENEMY_RADIUS,
@@ -279,6 +340,50 @@ function handleBossChase(
     }
     sprite.x = newX;
     sprite.y = newY;
+  }
+}
+
+/**
+ * Boss volley behaviour: stationary, fires 3-projectile fans toward player.
+ * Damage is applied in updateBioProjectiles (combat.ts) via proj.damage > 0.
+ */
+function handleBossVolley(
+  ctx: AIContext,
+  sprite: Sprite,
+  px: number, py: number,
+  dist: number, dx: number, dy: number,
+  deltaTime: number
+): void {
+  // Boss stays stationary while volleying (no movement).
+
+  // Muzzle flash on the boss to give a visual cue of firing.
+  if (!sprite.muzzleFlashTimer) sprite.muzzleFlashTimer = 0;
+
+  sprite.bossVolleyTimer -= deltaTime;
+  if (sprite.bossVolleyTimer <= 0) {
+    sprite.bossVolleyTimer = BOSS_VOLLEY_COOLDOWN;
+    sprite.muzzleFlashTimer = 0.2;
+
+    // Fire a 3-projectile fan toward the player.
+    const baseAngle = Math.atan2(dy, dx);
+    const fanRad = BOSS_VOLLEY_FAN_DEG * (Math.PI / 180);
+
+    for (let i = -1; i <= 1; i++) {
+      const angle = baseAngle + (fanRad / 2) * i;
+      const emitX = sprite.x + Math.cos(angle) * 0.4;
+      const emitY = sprite.y + Math.sin(angle) * 0.4;
+      ctx.bioProjectiles.push(new BioProjectile(
+        emitX, emitY,
+        Math.cos(angle), Math.sin(angle),
+        BOSS_VOLLEY_PROJECTILE_SPEED,
+        BOSS_VOLLEY_PROJECTILE_LIFE,
+        BOSS_VOLLEY_DAMAGE
+      ));
+    }
+  }
+
+  if (sprite.muzzleFlashTimer > 0) {
+    sprite.muzzleFlashTimer -= deltaTime;
   }
 }
 
