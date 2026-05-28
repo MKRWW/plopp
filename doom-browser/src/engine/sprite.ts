@@ -170,6 +170,10 @@ export class Sprite {
   // alive → dying transition. Renderer-only, no AI involvement.
   public bloodSpawned: boolean = false;
 
+  // Idle voice cooldown: seconds until next class-specific idle sound.
+  // Counts down while in IDLE state. Starts randomized 3–6 s.
+  public idleSoundCooldown: number = (Math.random() * 3) + 3;
+
   constructor(x: number, y: number, type: SpriteType, texture: Texture | null = null) {
     this.x = x;
     this.y = y;

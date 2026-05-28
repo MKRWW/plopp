@@ -18,7 +18,14 @@ export enum SoundType {
   ROCKET_SHOOT = 'rocketShoot',
   ROCKET_EXPLOSION = 'rocketExplosion',
   HEARTBEAT = 'heartbeat',
-  AMMO_LOW = 'ammoLow'
+  AMMO_LOW = 'ammoLow',
+  // Per-class procedural enemy voices
+  HUSK_IDLE = 'huskIdle',
+  HUSK_ALERT = 'huskAlert',
+  SPITTER_IDLE = 'spitterIdle',
+  SPITTER_ALERT = 'spitterAlert',
+  LATCHER_IDLE = 'latcherIdle',
+  LATCHER_ALERT = 'latcherAlert'
 }
 
 /**
@@ -160,14 +167,17 @@ export class SoundManager {
 
   /**
    * Spielt einen Sound-Effekt ab.
+   * @param volume - Gain multiplier (default 1). Applied to all synth gain envelopes.
    */
-  public play(soundType: SoundType): void {
+  public play(soundType: SoundType, volume?: number): void {
     if (!this.enabled || !this.audioContext) return;
 
     // Wenn Context suspended ist (Browser-Policy), resümiere ihn
     if (this.audioContext.state === 'suspended') {
       this.audioContext.resume();
     }
+
+    const v = volume ?? 1;
 
     switch (soundType) {
       case SoundType.SHOOT:
@@ -203,7 +213,40 @@ export class SoundManager {
       case SoundType.AMMO_LOW:
         this.playAmmoLow();
         break;
+      case SoundType.HUSK_IDLE:
+        this.playHuskIdle(v);
+        break;
+      case SoundType.HUSK_ALERT:
+        this.playHuskAlert(v);
+        break;
+      case SoundType.SPITTER_IDLE:
+        this.playSpitterIdle(v);
+        break;
+      case SoundType.SPITTER_ALERT:
+        this.playSpitterAlert(v);
+        break;
+      case SoundType.LATCHER_IDLE:
+        this.playLatcherIdle(v);
+        break;
+      case SoundType.LATCHER_ALERT:
+        this.playLatcherAlert(v);
+        break;
     }
+  }
+
+  /**
+   * Distance-attenuated sound playback for enemy voices.
+   * Falloff: 1 / (1 + d * 0.1875) so volume ~0.4 at 8 tile distance.
+   * Cuts to silence past 12 tiles (AI_AWARENESS_RADIUS * 1.5).
+   */
+  public playAt(soundType: SoundType, distance: number): void {
+    if (!this.enabled || !this.audioContext) return;
+    if (distance > 12.0) return; // beyond effective range
+    if (this.audioContext.state === 'suspended') {
+      this.audioContext.resume();
+    }
+    const volume = 1 / (1 + distance * 0.1875);
+    this.play(soundType, volume);
   }
 
   /**
@@ -630,5 +673,199 @@ export class SoundManager {
     oscGain.connect(this.masterGain);
     osc.start(t);
     osc.stop(t + 0.7);
+  }
+
+  // ---- Per-class procedural enemy voices ----
+
+  /**
+   * Husk idle: low growl. Sawtooth 80-120 Hz, slow LFO wobble, ~250 ms.
+   */
+  private playHuskIdle(volume: number): void {
+    if (!this.audioContext || !this.masterGain) return;
+
+    const t = this.audioContext.currentTime;
+    const osc = this.audioContext.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(100, t);
+    osc.frequency.linearRampToValueAtTime(80, t + 0.12);
+    osc.frequency.linearRampToValueAtTime(110, t + 0.2);
+    osc.frequency.linearRampToValueAtTime(85, t + 0.25);
+
+    const gain = this.audioContext.createGain();
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.35 * volume, t + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(t);
+    osc.stop(t + 0.26);
+  }
+
+  /**
+   * Husk alert: sharper rising tone, ~400 ms.
+   */
+  private playHuskAlert(volume: number): void {
+    if (!this.audioContext || !this.masterGain) return;
+
+    const t = this.audioContext.currentTime;
+    const osc = this.audioContext.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(120, t);
+    osc.frequency.exponentialRampToValueAtTime(400, t + 0.2);
+    osc.frequency.exponentialRampToValueAtTime(150, t + 0.4);
+
+    const gain = this.audioContext.createGain();
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.4 * volume, t + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(t);
+    osc.stop(t + 0.42);
+  }
+
+  /**
+   * Spitter idle: wet clicking. Short noise bursts, band-pass filtered.
+   */
+  private playSpitterIdle(volume: number): void {
+    if (!this.audioContext || !this.masterGain) return;
+
+    const t = this.audioContext.currentTime;
+    for (let i = 0; i < 4; i++) {
+      const start = t + i * 0.07;
+      const bufferSize = this.audioContext.sampleRate * 0.03;
+      const buffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let j = 0; j < bufferSize; j++) {
+        data[j] = (Math.random() * 2 - 1) * Math.exp(-j / (bufferSize * 0.2));
+      }
+      const noise = this.audioContext.createBufferSource();
+      noise.buffer = buffer;
+
+      const filter = this.audioContext.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.value = 2000;
+      filter.Q.value = 3;
+
+      const gain = this.audioContext.createGain();
+      gain.gain.setValueAtTime(0.3 * volume, start);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.03);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.masterGain);
+      noise.start(start);
+      noise.stop(start + 0.04);
+    }
+  }
+
+  /**
+   * Spitter alert: high chirp + click tail.
+   */
+  private playSpitterAlert(volume: number): void {
+    if (!this.audioContext || !this.masterGain) return;
+
+    const t = this.audioContext.currentTime;
+
+    // High chirp
+    const osc = this.audioContext.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(2000, t);
+    osc.frequency.exponentialRampToValueAtTime(500, t + 0.15);
+
+    const gain = this.audioContext.createGain();
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.3 * volume, t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(t);
+    osc.stop(t + 0.16);
+
+    // Click tail
+    const bufferSize = this.audioContext.sampleRate * 0.04;
+    const buffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let j = 0; j < bufferSize; j++) {
+      data[j] = (Math.random() * 2 - 1) * Math.exp(-j / (bufferSize * 0.15));
+    }
+    const noise = this.audioContext.createBufferSource();
+    noise.buffer = buffer;
+
+    const filter = this.audioContext.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.value = 3000;
+
+    const nGain = this.audioContext.createGain();
+    nGain.gain.setValueAtTime(0.25 * volume, t + 0.17);
+    nGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+
+    noise.connect(filter);
+    filter.connect(nGain);
+    nGain.connect(this.masterGain);
+    noise.start(t + 0.17);
+    noise.stop(t + 0.23);
+  }
+
+  /**
+   * Latcher idle: skittering. Rapid noise bursts.
+   */
+  private playLatcherIdle(volume: number): void {
+    if (!this.audioContext || !this.masterGain) return;
+
+    const t = this.audioContext.currentTime;
+    for (let i = 0; i < 8; i++) {
+      const start = t + i * 0.025;
+      const bufferSize = this.audioContext.sampleRate * 0.015;
+      const buffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let j = 0; j < bufferSize; j++) {
+        data[j] = (Math.random() * 2 - 1) * Math.exp(-j / (bufferSize * 0.3));
+      }
+      const noise = this.audioContext.createBufferSource();
+      noise.buffer = buffer;
+
+      const filter = this.audioContext.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.value = 1500 + Math.random() * 2000;
+
+      const gain = this.audioContext.createGain();
+      gain.gain.setValueAtTime(0.15 * volume, start);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.015);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.masterGain);
+      noise.start(start);
+      noise.stop(start + 0.02);
+    }
+  }
+
+  /**
+   * Latcher alert: high-pitch screech, ~200 ms.
+   */
+  private playLatcherAlert(volume: number): void {
+    if (!this.audioContext || !this.masterGain) return;
+
+    const t = this.audioContext.currentTime;
+    const osc = this.audioContext.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(1800, t);
+    osc.frequency.exponentialRampToValueAtTime(600, t + 0.1);
+    osc.frequency.exponentialRampToValueAtTime(1200, t + 0.15);
+    osc.frequency.exponentialRampToValueAtTime(400, t + 0.2);
+
+    const gain = this.audioContext.createGain();
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.35 * volume, t + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(t);
+    osc.stop(t + 0.22);
   }
 }

@@ -20,6 +20,7 @@ import {
 } from './sprite';
 import { Player } from '../player/player';
 import { BioProjectile } from './bio-projectile';
+import { SoundManager, SoundType } from '../audio/sound';
 import {
   hasLineOfSight,
   slideAlongX,
@@ -36,7 +37,20 @@ export interface AIContext {
   player: Player;
   sprites: Sprite[];
   bioProjectiles: BioProjectile[];
+  soundManager: SoundManager;
   triggerDamageFlash: () => void;
+}
+
+function enemyIdleSoundType(sprite: Sprite): SoundType {
+  if (sprite.enemyClass === EnemyClass.SHOOTER) return SoundType.SPITTER_IDLE;
+  if (sprite.enemyClass === EnemyClass.LATCHER) return SoundType.LATCHER_IDLE;
+  return SoundType.HUSK_IDLE;
+}
+
+function enemyAlertSoundType(sprite: Sprite): SoundType {
+  if (sprite.enemyClass === EnemyClass.SHOOTER) return SoundType.SPITTER_ALERT;
+  if (sprite.enemyClass === EnemyClass.LATCHER) return SoundType.LATCHER_ALERT;
+  return SoundType.HUSK_ALERT;
 }
 
 const attackRange = MIN_ENTITY_DIST;
@@ -81,10 +95,19 @@ export function updateEnemyAI(ctx: AIContext, deltaTime: number): void {
           sprite.facingAngle = Math.atan2(toTargetY, toTargetX);
         }
 
+        // Per-class idle voice: chirp at random cadence so distant enemies
+        // make the level feel alive without spamming the audio bed.
+        sprite.idleSoundCooldown -= deltaTime;
+        if (sprite.idleSoundCooldown <= 0) {
+          ctx.soundManager.playAt(enemyIdleSoundType(sprite), dist);
+          sprite.idleSoundCooldown = (Math.random() * 4) + 4;
+        }
+
         if (dist <= AI_AWARENESS_RADIUS && hasLineOfSight(sprite.x, sprite.y, px, py)) {
           sprite.aiState = EnemyAIState.ALERT;
           sprite.alertTimer = AI_ALERT_TO_CHASE_DELAY;
           sprite.facingAngle = angleToPlayer;
+          ctx.soundManager.playAt(enemyAlertSoundType(sprite), dist);
         }
         break;
       }
@@ -104,6 +127,7 @@ export function updateEnemyAI(ctx: AIContext, deltaTime: number): void {
             sprite.aiState = EnemyAIState.CHASE;
             sprite.alertFadeoutTimer = 0;
             sprite.alertTimer = 0;
+            ctx.soundManager.playAt(enemyAlertSoundType(sprite), dist);
             break;
           }
           break;
@@ -119,6 +143,7 @@ export function updateEnemyAI(ctx: AIContext, deltaTime: number): void {
         } else if (dist <= AI_AWARENESS_RADIUS && hasLineOfSight(sprite.x, sprite.y, px, py)) {
           sprite.aiState = EnemyAIState.CHASE;
           sprite.alertTimer = 0;
+          ctx.soundManager.playAt(enemyAlertSoundType(sprite), dist);
         }
         break;
       }
@@ -424,6 +449,7 @@ export function broadcastGunshot(ctx: AIContext): void {
       sprite.alertTimer = AI_ALERT_TO_CHASE_DELAY;
       sprite.facingAngle = angleToPlayer;
       sprite.heardGunshotTime = performance.now() / 1000;
+      ctx.soundManager.playAt(enemyAlertSoundType(sprite), dist);
     } else if (sprite.aiState === EnemyAIState.ALERT) {
       sprite.alertTimer = AI_ALERT_TO_CHASE_DELAY;
       sprite.facingAngle = angleToPlayer;

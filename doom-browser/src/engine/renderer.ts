@@ -301,6 +301,7 @@ export class Renderer {
       player: this.player,
       sprites: this.sprites,
       bioProjectiles: this.bioProjectiles,
+      soundManager: this.soundManager,
       triggerDamageFlash: () => this.triggerDamageFlash(),
     };
   }
