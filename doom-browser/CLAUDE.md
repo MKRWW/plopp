@@ -15,7 +15,7 @@ keine externen Assets, alles prozedural. TypeScript + Vite.
 
 ### Engine ([src/engine/](src/engine/))
 - [renderer.ts](src/engine/renderer.ts) — Game-Loop-Orchestrierung, DDA-Raycaster, Sprite-Rendering, HUD, Waffen-Zeichnen, Pickup-Logik
-- [enemy-ai.ts](src/engine/enemy-ai.ts) — Enemy-AI-State-Machine + per-class Chase-Verhalten (Husk / Spitter / Latcher), Gunshot-Awareness
+- [enemy-ai.ts](src/engine/enemy-ai.ts) — Enemy-AI-State-Machine + per-class Chase-Verhalten (Husk / Spitter / Latcher / Boss), Gunshot-Awareness, Idle/Alert-Sound-Trigger
 - [combat.ts](src/engine/combat.ts) — Spieler-Schuss + Hit-Detection, Rocket- und Bio-Projektil-Lifecycle, Wall-Impact-Trigger
 - [effects.ts](src/engine/effects.ts) — Blut-Partikel, Bio/Rocket-Render-Pässe, Damage-Flash, Low-Health-Vignette, Heartbeat, Headbob, Screen-Shake, Hit-Marker
 - [level-flow.ts](src/engine/level-flow.ts) — Level-Transition (mit Generation-Retry), Install, Sprite-Initialisierung, Game-Reset, Loading-Tick

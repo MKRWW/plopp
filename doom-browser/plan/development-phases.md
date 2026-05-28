@@ -44,13 +44,16 @@ Bei größeren Änderungen mitpflegen — nicht jeden Bugfix einzeln.
 
 | Feature                                       | Status | Quelle                                                            |
 | --------------------------------------------- | :----: | ----------------------------------------------------------------- |
-| Grunt (Melee-Chase)                           | ✓      | [sprite.ts](../src/engine/sprite.ts), [renderer.ts](../src/engine/renderer.ts) |
-| Shooter (Ranged, Raycast, 5-Tile-Range)       | ✓      | [sprite.ts](../src/engine/sprite.ts), [renderer.ts](../src/engine/renderer.ts) |
-| AI-State-Machine IDLE / ALERT / CHASE         | ✓      | [sprite.ts](../src/engine/sprite.ts)                              |
-| Gunshot-Awareness (12-Tile-Radius)            | ✓      | [renderer.ts](../src/engine/renderer.ts)                          |
+| Husk (Melee-Chase)                            | ✓      | [enemy-ai.ts](../src/engine/enemy-ai.ts), [sprite.ts](../src/engine/sprite.ts) |
+| Spitter (Ranged, Bio-Projektil, 5-Tile-Range) | ✓      | [enemy-ai.ts](../src/engine/enemy-ai.ts), [bio-projectile.ts](../src/engine/bio-projectile.ts) |
+| Latcher (Pounce-Parasit, Windup → Leap)       | ✓      | [enemy-ai.ts](../src/engine/enemy-ai.ts)                          |
+| Boss (3-Phasen: MELEE → VOLLEY → RAGE)        | ✓      | [enemy-ai.ts](../src/engine/enemy-ai.ts)                          |
+| AI-State-Machine IDLE / ALERT / CHASE         | ✓      | [enemy-ai.ts](../src/engine/enemy-ai.ts)                          |
+| Gunshot-Awareness (12-Tile-Radius)            | ✓      | [enemy-ai.ts](../src/engine/enemy-ai.ts)                          |
 | 8-Richtungs-Sprites pro Pose                  | ✓      | [sprite-textures.ts](../src/engine/sprite-textures.ts)            |
 | Sterbe-Animation + Corpse-Persistence         | ✓      | [sprite.ts](../src/engine/sprite.ts)                              |
-| Hit-Flash                                     | ✓      | [sprite.ts](../src/engine/sprite.ts)                              |
+| Per-class Hit-Flash (Cyan/Bio/Orange)         | ✓      | [renderer.ts](../src/engine/renderer.ts)                          |
+| Blut-Partikel beim Tod                        | ✓      | [effects.ts](../src/engine/effects.ts), [blood-particle.ts](../src/engine/blood-particle.ts) |
 
 ## Waffen
 
@@ -72,8 +75,12 @@ Bei größeren Änderungen mitpflegen — nicht jeden Bugfix einzeln.
 | Pickup-Hinweis im HUD                         | ✓      | [renderer.ts](../src/engine/renderer.ts)                          |
 | Player-Centered Minimap mit Scrolling         | ✓      | [minimap.ts](../src/game/minimap.ts)                              |
 | Web-Audio SFX (Schuss, Treffer, Tod, Pickup…) | ✓      | [sound.ts](../src/audio/sound.ts)                                 |
+| Per-class Idle/Alert-Voices (distance-attenuated) | ✓  | [sound.ts](../src/audio/sound.ts), [enemy-ai.ts](../src/engine/enemy-ai.ts) |
+| Low-Health-Heartbeat + Vignette               | ✓      | [effects.ts](../src/engine/effects.ts), [sound.ts](../src/audio/sound.ts) |
+| Headbob + Screen-Shake                        | ✓      | [effects.ts](../src/engine/effects.ts)                            |
 | MP3-Musik-Playlist mit Shuffle                | ✓      | [sound.ts](../src/audio/sound.ts), [resources/sound/](../resources/sound/) |
 | Game-States Menu/Playing/Paused/Loading/Dead/Win | ✓   | [state.ts](../src/game/state.ts)                                  |
+| BOSS_STAGE = 10 → Win-Screen bei Boss-Tod     | ✓      | [level-gen.ts](../src/engine/level-gen.ts), [renderer.ts](../src/engine/renderer.ts) |
 | Loading-Screen mit Progress-Bar               | ✓      | [state.ts](../src/game/state.ts)                                  |
 | Pause via ESC + Auto-Resume bei Pointer-Lock  | ✓      | [state.ts](../src/game/state.ts)                                  |
 
