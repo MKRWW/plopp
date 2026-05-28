@@ -104,11 +104,6 @@ existieren bereits. Was fehlt:
 
 Vollständiger Plan: [.hermes/plans/multi-door-levels.md](../../.hermes/plans/multi-door-levels.md)
 
-### Renderer-Aufbrechen
-`renderer.ts` ist ~100KB und mischt Raycasting, Enemy-AI-Tick, Shoot/Hit-Logik,
-Pickup-Logik und Level-Transitions. Vorschlag: AI-Tick und Pickup-Logik in
-eigene Module ziehen.
-
 ### Test-Konsolidierung
 [src/engine/level-gen.test.ts](../src/engine/level-gen.test.ts) und
 [src/engine/__tests__/level-gen.test.ts](../src/engine/__tests__/level-gen.test.ts)

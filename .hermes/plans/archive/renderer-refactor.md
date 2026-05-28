@@ -1,7 +1,26 @@
-# Sprint Plan: Renderer Refactor
+# Sprint Plan: Renderer Refactor — ✅ DONE (2026-05-28)
 
-> Status: drafted, not started. Pick this up in a fresh session.
-> Each Task = one commit. No behaviour changes are allowed at any step.
+> **Status: COMPLETE.** All four tasks shipped on develop.
+>
+> Commits (in order):
+> - `1d38546` refactor(engine): extract enemy AI from renderer into enemy-ai.ts
+> - `6506223` refactor(engine): extract combat into combat.ts
+> - `9dd486b` refactor(engine): extract effects into effects.ts
+> - `3a16bf5` refactor(engine): extract level flow into level-flow.ts
+>
+> Final outcome: renderer.ts went from **3181 → 1988 LOC** (~37% smaller).
+> Four new sibling modules: `enemy-ai.ts` (435), `combat.ts` (263),
+> `effects.ts` (438), `level-flow.ts` (343). No behaviour changes;
+> smoke-tested after each task.
+>
+> Workflow used: prompts in this doc were copy-pasted to a local
+> qwen3.6 worker, results reviewed and corrected by Claude before
+> commit. Task 4 needed two reviewer-applied fixes (sprite-array
+> mutation, `if (LOADING)` wrapper) — documented in commit
+> `3a16bf5`'s body.
+>
+> Kept for historical reference. Each Task = one commit. No behaviour
+> changes were allowed at any step.
 
 ## Problem
 
