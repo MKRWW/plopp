@@ -3,7 +3,7 @@ import { MAP_WIDTH, MAP_HEIGHT, worldState, InteractionResult } from './world';
 import { ZBuffer } from './zbuffer';
 import { InputHandler, pointerLockSupported } from '../player/input';
 import { TextureManager, Texture } from './textures';
-import { Sprite, SpriteType, generateSpriteTextures, EnemyAIState, EnemyClass, AI_IDLE_PATROL_RADIUS, AI_SHOOTER_RANGE, AI_SHOOTER_MIN_DIST, AI_SHOOTER_COOLDOWN, AI_SHOOTER_DAMAGE, LatcherState } from './sprite';
+import { Sprite, SpriteType, LatcherState } from './sprite';
 import { updateEnemyAI, broadcastGunshot, type AIContext } from './enemy-ai';
 import { handlePlayerShoot, updateRockets, updateBioProjectiles, type CombatContext } from './combat';
 import {
@@ -25,7 +25,6 @@ import {
   type EffectsContext,
   type EffectsState,
 } from './effects';
-import { huskCorpseTexture, spitterCorpseTexture, SpriteTextureSet } from './sprite-textures';
 import { GameState, GameStateManager } from '../game/state';
 import { Weapon, WeaponState } from '../game/weapon';
 import { WeaponInventory, WeaponType, WEAPONS } from '../game/weapons';
@@ -35,22 +34,25 @@ import { BloodParticle } from './blood-particle';
 import { ENEMY_RADIUS } from './collision';
 import { Minimap } from '../game/minimap';
 import { SoundManager, SoundType } from '../audio/sound';
-import { Level, generateLevel } from './level-gen';
+import { Level } from './level-gen';
+import {
+  initializeSprites as initSpritesFlow,
+  beginLevelTransition as beginTransitionFlow,
+  installLevel as installFlow,
+  resetGameFlow,
+  tickLoading,
+  LOAD_ANIM_MS,
+  STAGE_BANNER_DURATION,
+  type LevelFlowContext,
+  type LevelFlowState,
+} from './level-flow';
 
-/**
- * Konstanten für den Raycaster.
- */
 const SCREEN_WIDTH = 640;
 const SCREEN_HEIGHT = 480;
 const MOVE_SPEED = 3.0;          // Tiles pro Sekunde (Normal)
 const SPRINT_MULTIPLIER = 1.8;  // Sprint-Faktor
 const CORPSE_SCALE = 0.18;      // Corpse height as fraction of full sprite height
 
-/**
- * Raycasting-Renderer.
- * Implementiert den klassischen DDA-Algorithmus (Digital Differential Analyzer)
- * für Wolfenstein-3D-Style Rendering.
- */
 export class Renderer {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
@@ -129,24 +131,9 @@ export class Renderer {
   private weaponFlashName: string = '';
   private readonly WEAPON_FLASH_DURATION: number = 1.5;
 
-  // Procedural Levels: aktuelles Level + Stage-Counter + Basis-Seed.
-  // Das Level wird beim Stage-Wechsel mit (baseSeed, stage) neu generiert,
-  // damit Spielzüge reproduzierbar sind, falls man den Seed kennt.
-  private currentLevel: Level;
-  private stage: number;
-  private baseSeed: number;
-
-  // Stage-Übergangs-HUD (Banner mit "STAGE N")
-  private stageBannerTimer: number = 0;
-  private readonly stageBannerDuration: number = 2.0;
-
-  // Loading screen state for stage transitions
-  private isLoading: boolean = false;
-  private loadingProgress: number = 0;
-  private pendingLevel: Level | null = null;
-  private loadingTargetStage: number = 0;
-  private loadingAnimStart: number = 0;
-  private readonly LOAD_ANIM_MS = 700;
+  // Procedural Levels: Seed, Stage, aktuelles Level und Loading-Zustand
+  // werden jetzt in levelFlowState gebündelt (siehe level-flow.ts).
+  private levelFlowState: LevelFlowState;
 
   constructor(
     player: Player,
@@ -160,14 +147,22 @@ export class Renderer {
     this.gameStateManager = gameStateManager;
     this.weapon = weapon;
     this.inventory = inventory;
-    this.currentLevel = level;
-    this.stage = level.stage;
-    this.baseSeed = baseSeed;
+    this.levelFlowState = {
+      baseSeed,
+      stage: level.stage,
+      currentLevel: level,
+      isLoading: false,
+      pendingLevel: null,
+      loadingProgress: 0,
+      loadingTargetStage: 0,
+      loadingAnimStart: 0,
+      stageBannerTimer: 0,
+    };
     this.zBuffer = new ZBuffer(SCREEN_WIDTH);
     this.textureManager = new TextureManager();
     this.textureManager.initialize();
     this.generateMuzzleFlashTexture();
-    this.initializeSprites();
+    initSpritesFlow(this.levelFlowCtx(), this.levelFlowState.currentLevel);
     this.pointerLockAvailable = pointerLockSupported();
 
     // Phase 8: Minimap & Sound initialisieren
@@ -295,9 +290,6 @@ export class Renderer {
     }
   }
 
-  /**
-   * Setzt Damage-Flash-Timer (wird vom HUD gerendert).
-   */
   public triggerDamageFlash(): void {
     this.effectsState.damageFlashTimer = this.effectsState.damageFlashDuration;
     // Sound: Damage
@@ -354,233 +346,15 @@ export class Renderer {
     };
   }
 
-  /**
-   * Spawnt alle Sprites des aktuellen Levels: Gegner, Items, Keycard, Decor und
-   * optionales Secret-Item. Liest ausschließlich aus `this.currentLevel`.
-   */
-  private initializeSprites(): void {
-    const spriteSet: SpriteTextureSet = generateSpriteTextures();
-    const flat = spriteSet.flat;
-    const enemyTextures = flat.get(SpriteType.ENEMY);
-    const ammoTextures = flat.get(SpriteType.AMMO);
-    const healthTextures = flat.get(SpriteType.HEALTH);
-    const keycardTextures = flat.get(SpriteType.KEYCARD);
-    const yellowKeycardTextures = flat.get(SpriteType.YELLOW_KEYCARD);
-    const decorTextures: Partial<Record<SpriteType, Texture[] | undefined>> = {
-      [SpriteType.BARREL]: flat.get(SpriteType.BARREL),
-      [SpriteType.TERMINAL]: flat.get(SpriteType.TERMINAL),
-      [SpriteType.LAMP]: flat.get(SpriteType.LAMP),
-      [SpriteType.DEBRIS]: flat.get(SpriteType.DEBRIS),
+  private levelFlowCtx(): LevelFlowContext {
+    return {
+      player: this.player,
+      weapon: this.weapon,
+      inventory: this.inventory,
+      gameStateManager: this.gameStateManager,
+      soundManager: this.soundManager,
+      sprites: this.sprites,
     };
-
-    const level = this.currentLevel;
-
-    // Gegner
-    for (const pos of level.enemies) {
-      const enemy = new Sprite(pos.x, pos.y, SpriteType.ENEMY, enemyTextures?.[0] ?? null);
-      if (enemyTextures) enemy.textures = enemyTextures;
-      enemy.angleViews = spriteSet.huskAngleViews;
-      enemy.facingAngle = Math.atan2(this.player.y - pos.y, this.player.x - pos.x);
-      enemy.animationSpeed = 0.4;
-      enemy.corpseTexture = huskCorpseTexture;
-      enemy.aiState = EnemyAIState.IDLE;
-      enemy.alertTimer = 0;
-      enemy.alertFadeoutTimer = 0;
-      enemy.heardGunshotTime = 0;
-      const angle = Math.random() * Math.PI * 2;
-      const dist = Math.random() * AI_IDLE_PATROL_RADIUS;
-      enemy.idleWanderTargetX = pos.x + Math.cos(angle) * dist;
-      enemy.idleWanderTargetY = pos.y + Math.sin(angle) * dist;
-      enemy.idleWanderTimer = 1 + Math.random() * 2;
-      this.sprites.push(enemy);
-    }
-
-    // Shooter enemies
-    const spitterTextures = flat.get(SpriteType.SHOOTER);
-    for (const pos of level.shooters) {
-      const shooter = new Sprite(pos.x, pos.y, SpriteType.SHOOTER, spitterTextures?.[0] ?? enemyTextures?.[0] ?? null);
-      if (spitterTextures) shooter.textures = spitterTextures; else if (enemyTextures) shooter.textures = enemyTextures;
-      shooter.angleViews = spriteSet.spitterAngleViews;
-      shooter.facingAngle = Math.atan2(this.player.y - pos.y, this.player.x - pos.x);
-      shooter.animationSpeed = 0.4;
-      shooter.corpseTexture = spitterCorpseTexture;
-      shooter.aiState = EnemyAIState.IDLE;
-      shooter.alertTimer = 0;
-      shooter.alertFadeoutTimer = 0;
-      shooter.heardGunshotTime = 0;
-      shooter.enemyClass = EnemyClass.SHOOTER;
-      shooter.health = 2;
-      shooter.shooterRange = AI_SHOOTER_RANGE;
-      shooter.shooterMinDist = AI_SHOOTER_MIN_DIST;
-      shooter.shooterCooldown = AI_SHOOTER_COOLDOWN;
-      shooter.shooterDamage = AI_SHOOTER_DAMAGE;
-      shooter.muzzleFlashTimer = 0;
-      const angle = Math.random() * Math.PI * 2;
-      const dist = Math.random() * AI_IDLE_PATROL_RADIUS;
-      shooter.idleWanderTargetX = pos.x + Math.cos(angle) * dist;
-      shooter.idleWanderTargetY = pos.y + Math.sin(angle) * dist;
-      shooter.idleWanderTimer = 1 + Math.random() * 2;
-      this.sprites.push(shooter);
-    }
-
-    // Latcher enemies — fast pounce parasites.
-    const latcherTextures = flat.get(SpriteType.LATCHER);
-    for (const pos of level.latchers) {
-      const latcher = new Sprite(pos.x, pos.y, SpriteType.LATCHER, latcherTextures?.[0] ?? null);
-      if (latcherTextures) latcher.textures = latcherTextures;
-      latcher.angleViews = spriteSet.latcherAngleViews;
-      latcher.facingAngle = Math.atan2(this.player.y - pos.y, this.player.x - pos.x);
-      // Disable auto-frame-cycling — handleLatcherChase manually sets the
-      // texture / currentFrame to reflect the AI state machine.
-      latcher.animationSpeed = 9999;
-      // Latcher corpses share the husk pile look for now — same chitin family.
-      latcher.corpseTexture = huskCorpseTexture;
-      latcher.aiState = EnemyAIState.IDLE;
-      latcher.alertTimer = 0;
-      latcher.alertFadeoutTimer = 0;
-      latcher.heardGunshotTime = 0;
-      latcher.enemyClass = EnemyClass.LATCHER;
-      latcher.health = 1;  // single shot kills it
-      latcher.latcherState = LatcherState.APPROACH;
-      latcher.latcherStateTimer = 0;
-      const angle = Math.random() * Math.PI * 2;
-      const dist = Math.random() * AI_IDLE_PATROL_RADIUS;
-      latcher.idleWanderTargetX = pos.x + Math.cos(angle) * dist;
-      latcher.idleWanderTargetY = pos.y + Math.sin(angle) * dist;
-      latcher.idleWanderTimer = 1 + Math.random() * 2;
-      this.sprites.push(latcher);
-    }
-
-    // Ammo
-    for (const pos of level.ammo) {
-      const a = new Sprite(pos.x, pos.y, SpriteType.AMMO, ammoTextures?.[0] ?? null);
-      if (ammoTextures) a.textures = ammoTextures;
-      a.animationSpeed = 0.12;
-      this.sprites.push(a);
-    }
-
-    // Health
-    for (const pos of level.health) {
-      const h = new Sprite(pos.x, pos.y, SpriteType.HEALTH, healthTextures?.[0] ?? null);
-      if (healthTextures) h.textures = healthTextures;
-      h.animationSpeed = 0.12;
-      this.sprites.push(h);
-    }
-
-    // Yellow keycard
-    {
-      const k = new Sprite(level.yellowKeycard.x, level.yellowKeycard.y, SpriteType.YELLOW_KEYCARD, yellowKeycardTextures?.[0] ?? null);
-      if (yellowKeycardTextures) k.textures = yellowKeycardTextures;
-      k.animationSpeed = 0.12;
-      this.sprites.push(k);
-    }
-
-    // Blue keycard
-    {
-      const k = new Sprite(level.blueKeycard.x, level.blueKeycard.y, SpriteType.KEYCARD, keycardTextures?.[0] ?? null);
-      if (keycardTextures) k.textures = keycardTextures;
-      k.animationSpeed = 0.12;
-      this.sprites.push(k);
-    }
-
-    // Optionales Secret-Health hinter SECRET_WALL
-    if (level.secretHealth) {
-      const s = new Sprite(level.secretHealth.x, level.secretHealth.y, SpriteType.HEALTH, healthTextures?.[0] ?? null);
-      if (healthTextures) s.textures = healthTextures;
-      s.animationSpeed = 0.12;
-      this.sprites.push(s);
-    }
-
-    // Decor
-    for (const d of level.decor) {
-      const tex = decorTextures[d.type];
-      const sprite = new Sprite(d.x, d.y, d.type, tex?.[0] ?? null);
-      if (tex) sprite.textures = tex;
-      this.sprites.push(sprite);
-    }
-
-    // Shotgun pickups
-    const shotgunTextures = flat.get(SpriteType.WEAPON_SHOTGUN);
-    for (const pos of level.shotguns) {
-      const s = new Sprite(pos.x, pos.y, SpriteType.WEAPON_SHOTGUN, shotgunTextures?.[0] ?? null);
-      if (shotgunTextures) s.textures = shotgunTextures;
-      s.animationSpeed = 0.12;
-      this.sprites.push(s);
-    }
-
-    // Rocket Launcher pickups
-    const rocketTextures = flat.get(SpriteType.WEAPON_ROCKETLAUNCHER);
-    for (const pos of level.rocketLaunchers) {
-      const s = new Sprite(pos.x, pos.y, SpriteType.WEAPON_ROCKETLAUNCHER, rocketTextures?.[0] ?? null);
-      if (rocketTextures) s.textures = rocketTextures;
-      s.animationSpeed = 0.12;
-      this.sprites.push(s);
-    }
-  }
-
- /**
-   * Startet einen asynchronen Level-Übergang mit Loading-Screen.
-   *
-   * generateLevel kann nach MAX_ATTEMPTS pathologischer Seed/Stage-Kombinationen
-   * werfen. Früher hat das die Loading-Anzeige bei 0% deadlocken lassen, weil
-   * `pendingLevel` dann nie gesetzt wurde. Jetzt: try/catch um den Aufruf,
-   * Retries mit perturbiertem Seed, und bei wiederholtem Fehlschlag ein
-   * sauberer Fallback zurück ins Hauptmenü statt eingefrorenem Screen.
-   */
-  private beginLevelTransition(): void {
-    if (this.isLoading) return;
-    this.isLoading = true;
-    this.loadingTargetStage = this.stage + 1;
-    this.loadingProgress = 0;
-    this.gameStateManager.transitionTo(GameState.LOADING);
-
-    setTimeout(() => {
-      const MAX_RETRIES = 5;
-      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        const trySeed = (this.baseSeed ^ (attempt * 0x85EBCA6B)) >>> 0;
-        try {
-          this.pendingLevel = generateLevel(trySeed, this.loadingTargetStage);
-          this.loadingAnimStart = performance.now();
-          return;
-        } catch (err) {
-          console.warn(`beginLevelTransition: generateLevel attempt ${attempt + 1}/${MAX_RETRIES} for stage ${this.loadingTargetStage} failed:`, err);
-        }
-      }
-
-      // All retries exhausted — bail out to the menu instead of hanging the
-      // loading screen forever.
-      console.error(`beginLevelTransition: giving up on stage ${this.loadingTargetStage} after ${MAX_RETRIES} attempts. Returning to menu.`);
-      this.isLoading = false;
-      this.pendingLevel = null;
-      this.loadingProgress = 0;
-      this.gameStateManager.transitionTo(GameState.MENU);
-    }, 0);
-  }
-
-  /**
-   * Installiert ein vorbereitetes Level: setzt Welt, Spieler-Position, Sprites.
-   */
-  private installLevel(level: Level): void {
-    worldState.loadLevel(level);
-    this.currentLevel = level;
-    this.stage = level.stage;
-
-    this.player.setPosition(level.spawn.x, level.spawn.y);
-    this.player.dirX = level.spawn.dirX;
-    this.player.dirY = level.spawn.dirY;
-    this.player.planeX = -level.spawn.dirY * 0.66;
-    this.player.planeY = level.spawn.dirX * 0.66;
-
-    this.hasYellowKeycard = false;
-    this.hasBlueKeycard = false;
-    this.keycardPickupMessage = 0;
-    this.doorMessage = '';
-    this.doorMessageTimer = 0;
-    this.sprites = [];
-    this.initializeSprites();
-
-    this.stageBannerTimer = this.stageBannerDuration;
-    this.soundManager.play(SoundType.DOOR);
   }
 
   /**
@@ -1861,7 +1635,7 @@ export class Renderer {
     }
 
     // --- Exit Door proximity check (Position aus Level) ---
-    const exitDoorPos = this.currentLevel.exit;
+    const exitDoorPos = this.levelFlowState.currentLevel.exit;
     const exitDx = exitDoorPos.x - this.player.x;
     const exitDy = exitDoorPos.y - this.player.y;
     const exitDist = Math.sqrt(exitDx * exitDx + exitDy * exitDy);
@@ -1872,7 +1646,7 @@ export class Renderer {
         ctx.fillStyle = '#0f0';
         ctx.shadowColor = '#0f0';
         ctx.shadowBlur = 8;
-        ctx.fillText(`EXIT — [E] zu Stage ${this.stage + 1}`, w / 2, h - 90);
+        ctx.fillText(`EXIT — [E] zu Stage ${this.levelFlowState.stage + 1}`, w / 2, h - 90);
         ctx.shadowBlur = 0;
       } else {
         ctx.fillStyle = '#f44';
@@ -1897,67 +1671,23 @@ export class Renderer {
     ctx.textAlign = 'center';
     ctx.font = 'bold 14px monospace';
     ctx.fillStyle = '#aaa';
-    ctx.fillText(`STAGE ${this.stage}`, w / 2, 22);
+    ctx.fillText(`STAGE ${this.levelFlowState.stage}`, w / 2, 22);
 
     // --- Stage-Übergangs-Banner ---
-    if (this.stageBannerTimer > 0) {
-      const alpha = Math.min(1, this.stageBannerTimer / 0.7);
+    if (this.levelFlowState.stageBannerTimer > 0) {
+      const alpha = Math.min(1, this.levelFlowState.stageBannerTimer / 0.7);
       ctx.textAlign = 'center';
       ctx.font = 'bold 36px monospace';
       ctx.fillStyle = `rgba(255, 220, 80, ${alpha})`;
       ctx.shadowColor = '#fc0';
       ctx.shadowBlur = 14;
-      ctx.fillText(`STAGE ${this.stage}`, w / 2, h / 2 - 60);
+      ctx.fillText(`STAGE ${this.levelFlowState.stage}`, w / 2, h / 2 - 60);
       ctx.shadowBlur = 0;
     }
 
     ctx.textAlign = 'left';
   }
 
-  /**
-   * Reset des Spiels nach Tod: neuer Basis-Seed + frisches Stage 1.
-   * Jeder Run hat dadurch eine andere Level-Sequenz.
-   */
-  private resetGame(): void {
-    this.baseSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
-    this.stage = 1;
-    const level = generateLevel(this.baseSeed, this.stage);
-    worldState.loadLevel(level);
-    this.currentLevel = level;
-
-    // Spieler an Spawn des neuen Stage 1
-    this.player.setPosition(level.spawn.x, level.spawn.y);
-    this.player.dirX = level.spawn.dirX;
-    this.player.dirY = level.spawn.dirY;
-    this.player.planeX = -level.spawn.dirY * 0.66;
-    this.player.planeY = level.spawn.dirX * 0.66;
-    this.player.score = 0;
-
-    this.weapon.reset();
-    this.effectsState.damageFlashTimer = 0;
-    this.hasYellowKeycard = false;
-    this.hasBlueKeycard = false;
-    this.keycardPickupMessage = 0;
-
-    this.sprites = [];
-    this.initializeSprites();
-
-    this.doorMessage = '';
-    this.doorMessageTimer = 0;
-    this.stageBannerTimer = 0;
-
-    // Clear loading state to prevent zombie state on simultaneous death + exit
-    this.isLoading = false;
-    this.pendingLevel = null;
-    this.loadingProgress = 0;
-
-    this.weaponFlashTimer = 0;
-    this.weaponFlashName = '';
-  }
-
-  /**
-   * Main Render Loop mit Delta-Time.
-   */
   public start(): void {
     this.lastTime = performance.now();
 
@@ -1991,7 +1721,16 @@ export class Renderer {
       // Respawn: Wenn von DEAD/WIN zurück nach MENU → Spiel zurücksetzen
       if ((previousState === GameState.DEAD || previousState === GameState.WIN) &&
           gameState === GameState.MENU) {
-        this.resetGame();
+        resetGameFlow(this.levelFlowCtx(), this.levelFlowState);
+        // Non-Level-Flow-Felder zurücksetzen
+        this.effectsState.damageFlashTimer = 0;
+        this.hasYellowKeycard = false;
+        this.hasBlueKeycard = false;
+        this.keycardPickupMessage = 0;
+        this.doorMessage = '';
+        this.doorMessageTimer = 0;
+        this.weaponFlashTimer = 0;
+        this.weaponFlashName = '';
       }
       previousState = gameState;
 
@@ -2004,15 +1743,15 @@ export class Renderer {
 
       // --- Loading screen updates ---
       if (gameState === GameState.LOADING) {
-        if (this.pendingLevel !== null) {
-          const elapsed = performance.now() - this.loadingAnimStart;
-          this.loadingProgress = Math.min(elapsed / this.LOAD_ANIM_MS, 1.0);
-          if (this.loadingProgress >= 1.0) {
-            this.installLevel(this.pendingLevel);
-            this.isLoading = false;
-            this.pendingLevel = null;
-            this.gameStateManager.transitionTo(GameState.PLAYING);
-          }
+        const installed = tickLoading(this.levelFlowCtx(), this.levelFlowState);
+        if (installed) {
+          // Keycard/Door-State sind Renderer-eigen, kein Level-Flow-Feld —
+          // beim Level-Install genau einmal zurücksetzen.
+          this.hasYellowKeycard = false;
+          this.hasBlueKeycard = false;
+          this.keycardPickupMessage = 0;
+          this.doorMessage = '';
+          this.doorMessageTimer = 0;
         }
       }
 
@@ -2113,12 +1852,12 @@ export class Renderer {
 
         // Exit-Door: Spieler mit Keycard an der Exit-Tür → nächste Stage.
         if (this.hasYellowKeycard && this.hasBlueKeycard && this.input.isKey('KeyE') && !this.wasExitEPressed) {
-          const exitDx = this.currentLevel.exit.x - this.player.x;
-          const exitDy = this.currentLevel.exit.y - this.player.y;
+          const exitDx = this.levelFlowState.currentLevel.exit.x - this.player.x;
+          const exitDy = this.levelFlowState.currentLevel.exit.y - this.player.y;
           const exitDistSq = exitDx * exitDx + exitDy * exitDy;
           if (exitDistSq < 1.5 * 1.5) {
             this.player.score += 500;
-            this.beginLevelTransition();
+            beginTransitionFlow(this.levelFlowCtx(), this.levelFlowState);
           }
         }
         this.wasExitEPressed = this.input.isKey('KeyE');
@@ -2163,8 +1902,8 @@ export class Renderer {
       }
 
       // Stage-Banner-Timer
-      if (this.stageBannerTimer > 0) {
-        this.stageBannerTimer -= deltaTime;
+      if (this.levelFlowState.stageBannerTimer > 0) {
+        this.levelFlowState.stageBannerTimer -= deltaTime;
       }
 
       // Weapon Flash Timer
@@ -2197,7 +1936,7 @@ export class Renderer {
 
       // LOADING: render loading screen, skip gameplay rendering
       if (gameState === GameState.LOADING) {
-        this.gameStateManager.render(this.ctx, SCREEN_WIDTH, SCREEN_HEIGHT, this.player.health, this.loadingProgress, this.loadingTargetStage);
+        this.gameStateManager.render(this.ctx, SCREEN_WIDTH, SCREEN_HEIGHT, this.player.health, this.levelFlowState.loadingProgress, this.levelFlowState.loadingTargetStage);
       } else {
         // Render (immer, auch im Menu)
         this.drawFloorAndCeiling();
