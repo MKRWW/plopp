@@ -1,8 +1,30 @@
-# Sprint Plan: Boss + Enemy Voices
+# Sprint Plan: Boss + Enemy Voices — ✅ DONE (2026-05-28)
 
-> Status: drafted, not started. Pick this up in a fresh session.
-> Each Task = one commit. Behaviour parity is **not** the contract here
-> — these are new features. But: no regressions in existing gameplay.
+> **Status: COMPLETE.** All four tasks shipped on develop.
+>
+> Commits (in order):
+> - `3e5ec6a` feat(audio): per-class procedural enemy voices
+> - `ebc7b05` feat(boss): introduce BOSS enemy class with placeholder melee chase
+> - `dd64cee` feat(boss): three-phase HP-driven boss state machine
+> - `f160ccc` feat(boss): wire BOSS_STAGE = 10 + win condition on boss death
+>
+> Final outcome: Plopp has an audible enemy soundscape (per-class
+> distance-attenuated idle/alert SFX) and a real endgame (BOSS_STAGE
+> at level 10 with a three-phase boss — MELEE > 50% HP, VOLLEY
+> 20-50%, RAGE < 20% — that triggers `GameState.WIN` on death).
+>
+> Workflow notes from this sprint:
+> - Tasks 1 + 2: qwen3.6 hallucinated integration patches in its
+>   summary that were never actually written. Reviewer had to wire
+>   `enemy-ai.ts` / `renderer.ts` integration by hand both times.
+> - Tasks 3 + 4: after the qwen prompt was hardened with mandatory
+>   `git status` + `git diff --stat` output, qwen delivered the full
+>   spec (foundation + integration) cleanly on first pass. No
+>   reviewer fixups needed.
+>
+> Kept for historical reference. Original each-task-one-commit
+> discipline + copy-paste qwen prompts at the bottom of the file are
+> the template for future sprints.
 
 ## Problem
 
