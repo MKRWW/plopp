@@ -18,8 +18,9 @@ import {
   AI_SHOOTER_MIN_DIST,
   AI_SHOOTER_COOLDOWN,
   AI_SHOOTER_DAMAGE,
+  AI_BOSS_HP,
 } from './sprite';
-import { huskCorpseTexture, spitterCorpseTexture, SpriteTextureSet } from './sprite-textures';
+import { huskCorpseTexture, spitterCorpseTexture, bossCorpseTexture, SpriteTextureSet } from './sprite-textures';
 import { Texture } from './textures';
 import { worldState } from './world';
 import { Player } from '../player/player';
@@ -153,6 +154,31 @@ export function initializeSprites(ctx: LevelFlowContext, level: Level): void {
     latcher.idleWanderTargetY = pos.y + Math.sin(angle) * dist;
     latcher.idleWanderTimer = 1 + Math.random() * 2;
     ctx.sprites.push(latcher);
+  }
+
+  // Boss enemies — endgame opponent. level.bosses is empty until Task 4
+  // populates it on BOSS_STAGE; this loop is a no-op for regular stages.
+  const bossTextures = flat.get(SpriteType.BOSS);
+  for (const pos of level.bosses) {
+    const boss = new Sprite(pos.x, pos.y, SpriteType.BOSS, bossTextures?.[0] ?? null);
+    if (bossTextures) boss.textures = bossTextures;
+    boss.angleViews = spriteSet.bossAngleViews;
+    boss.facingAngle = Math.atan2(ctx.player.y - pos.y, ctx.player.x - pos.x);
+    boss.animationSpeed = 0.3;
+    boss.corpseTexture = bossCorpseTexture;
+    boss.aiState = EnemyAIState.IDLE;
+    boss.alertTimer = 0;
+    boss.alertFadeoutTimer = 0;
+    boss.heardGunshotTime = 0;
+    boss.enemyClass = EnemyClass.BOSS;
+    boss.health = AI_BOSS_HP;
+    boss.deathDuration = 1.5; // longer death anim befits a boss
+    const angle = Math.random() * Math.PI * 2;
+    const dist = Math.random() * AI_IDLE_PATROL_RADIUS;
+    boss.idleWanderTargetX = pos.x + Math.cos(angle) * dist;
+    boss.idleWanderTargetY = pos.y + Math.sin(angle) * dist;
+    boss.idleWanderTimer = 1 + Math.random() * 2;
+    ctx.sprites.push(boss);
   }
 
   // Ammo

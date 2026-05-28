@@ -564,7 +564,8 @@ export class Renderer {
               let g = srcData[srcIdx + 1] * brightness;
               let b = srcData[srcIdx + 2] * brightness;
 
-              // Hit-Flash: pro Gegner-Klasse eingefärbt (Cyan für Husk, Bio-Grün für Spitter).
+              // Hit-Flash: pro Gegner-Klasse eingefärbt (Cyan für Husk, Bio-Grün
+              // für Spitter, Orange für Boss). Latcher fällt in den Fallback.
               if (sprite.hitFlashTimer > 0) {
                 if (sprite.type === SpriteType.SHOOTER) {
                   // Spitter: Bio-Grün (SPITTER_BIO_HOT-Richtung)
@@ -576,8 +577,13 @@ export class Renderer {
                   r = Math.min(255, r + 50);
                   g = Math.min(255, g + 180);
                   b = Math.min(255, b + 220);
+                } else if (sprite.type === SpriteType.BOSS) {
+                  // Boss: Orange — reads as a big, dangerous target.
+                  r = Math.min(255, r + 200);
+                  g = Math.min(255, g + 120);
+                  b = Math.min(255, b + 30);
                 } else {
-                  // Fallback (sollte nicht vorkommen — andere Sprites haben keinen Hit-Flash)
+                  // Fallback (Latcher etc.)
                   r = Math.min(255, r + 180);
                   g = Math.min(255, g + 120);
                   b = Math.min(255, b + 80);

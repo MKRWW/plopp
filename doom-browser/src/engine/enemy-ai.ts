@@ -17,6 +17,10 @@ import {
   AI_LATCHER_LEAP_COOLDOWN,
   AI_LATCHER_DAMAGE,
   AI_LATCHER_CONTACT_RADIUS,
+  AI_BOSS_SPEED,
+  AI_BOSS_ATTACK_RANGE,
+  AI_BOSS_ATTACK_DAMAGE,
+  AI_BOSS_ATTACK_COOLDOWN,
 } from './sprite';
 import { Player } from '../player/player';
 import { BioProjectile } from './bio-projectile';
@@ -163,6 +167,8 @@ export function updateEnemyAI(ctx: AIContext, deltaTime: number): void {
           handleShooterChase(ctx, sprite, px, py, dist, dx, dy, aliveEnemies, deltaTime);
         } else if (sprite.enemyClass === EnemyClass.LATCHER) {
           handleLatcherChase(ctx, sprite, px, py, dist, dx, dy, aliveEnemies, deltaTime);
+        } else if (sprite.enemyClass === EnemyClass.BOSS) {
+          handleBossChase(ctx, sprite, px, py, dist, dx, dy, aliveEnemies, deltaTime);
         } else {
           handleGruntChase(ctx, sprite, px, py, dist, dx, dy, aliveEnemies, deltaTime);
         }
@@ -205,6 +211,54 @@ function handleGruntChase(
   } else {
     const moveX = (dx / dist) * chaseSpeed * deltaTime;
     const moveY = (dy / dist) * chaseSpeed * deltaTime;
+    let newX = slideAlongX(sprite.x, moveX, sprite.y, ENEMY_RADIUS);
+    let newY = slideAlongY(sprite.y, moveY, newX, ENEMY_RADIUS);
+    if (wouldOverlapEntity(newX, newY, ENEMY_RADIUS,
+      [{ x: px, y: py, radius: PLAYER_RADIUS }])) {
+      const push = resolveEntityCollision(newX, newY, ENEMY_RADIUS, px, py, PLAYER_RADIUS);
+      newX += push.dx;
+      newY += push.dy;
+    }
+    for (const other of aliveEnemies) {
+      if (other === sprite) continue;
+      if (wouldOverlapEntity(newX, newY, ENEMY_RADIUS,
+        [{ x: other.x, y: other.y, radius: ENEMY_RADIUS }])) {
+        const push = resolveEntityCollision(newX, newY, ENEMY_RADIUS,
+          other.x, other.y, ENEMY_RADIUS);
+        newX += push.dx;
+        newY += push.dy;
+      }
+    }
+    sprite.x = newX;
+    sprite.y = newY;
+  }
+}
+
+/**
+ * Boss chase: scaled-up Husk-style melee. Slower base speed, longer reach,
+ * heavier damage, longer cooldown. Task 3 replaces this with HP-driven phases
+ * (MELEE / VOLLEY / RAGE); Task 2 ships the placeholder so spawning, hit-flash,
+ * corpse and death-anim are exercised end-to-end first.
+ */
+function handleBossChase(
+  ctx: AIContext,
+  sprite: Sprite,
+  px: number, py: number,
+  dist: number, dx: number, dy: number,
+  aliveEnemies: Sprite[],
+  deltaTime: number
+): void {
+  if (dist < AI_BOSS_ATTACK_RANGE) {
+    if (!sprite.attackTimer) sprite.attackTimer = 0;
+    sprite.attackTimer += deltaTime;
+    if (sprite.attackTimer >= AI_BOSS_ATTACK_COOLDOWN) {
+      sprite.attackTimer = 0;
+      ctx.player.health -= AI_BOSS_ATTACK_DAMAGE;
+      ctx.triggerDamageFlash();
+    }
+  } else {
+    const moveX = (dx / dist) * AI_BOSS_SPEED * deltaTime;
+    const moveY = (dy / dist) * AI_BOSS_SPEED * deltaTime;
     let newX = slideAlongX(sprite.x, moveX, sprite.y, ENEMY_RADIUS);
     let newY = slideAlongY(sprite.y, moveY, newX, ENEMY_RADIUS);
     if (wouldOverlapEntity(newX, newY, ENEMY_RADIUS,

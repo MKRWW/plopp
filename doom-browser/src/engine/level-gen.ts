@@ -50,6 +50,7 @@ export interface Level {
   enemies: Vec2[];
   shooters: Vec2[];
   latchers: Vec2[];
+  bosses: Vec2[];
   ammo: Vec2[];
   health: Vec2[];
   secretHealth: Vec2 | null;
@@ -895,6 +896,7 @@ export function generateLevel(seed: number, stage: number): Level {
       enemies,
       shooters,
       latchers,
+      bosses: [],
       ammo,
       health,
       secretHealth,

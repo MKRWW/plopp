@@ -25,6 +25,7 @@ export enum SpriteType {
   ENEMY = 'enemy',
   SHOOTER = 'shooter',
   LATCHER = 'latcher',
+  BOSS = 'boss',
   AMMO = 'ammo',
   HEALTH = 'health',
   KEYCARD = 'keycard',
@@ -59,7 +60,8 @@ export function isCollectableSprite(type: SpriteType): boolean {
 export enum EnemyClass {
   GRUNT = 'grunt',
   SHOOTER = 'shooter',
-  LATCHER = 'latcher'
+  LATCHER = 'latcher',
+  BOSS = 'boss'
 }
 
 /** Shooter behavior constants (spec) */
@@ -84,6 +86,13 @@ export const AI_LATCHER_LEAP_SPEED = 8.0;        // horizontal travel speed in a
 export const AI_LATCHER_LEAP_COOLDOWN = 1.8;     // post-landing recovery
 export const AI_LATCHER_DAMAGE = 30;             // bite damage on contact
 export const AI_LATCHER_CONTACT_RADIUS = 0.55;   // touch radius for bite
+
+/** Boss behavior constants. Placeholder — Task 3 adds phases. */
+export const AI_BOSS_SPEED = 1.2;                // tiles/s, slow but deliberate
+export const AI_BOSS_HP = 30;                    // takes many hits
+export const AI_BOSS_ATTACK_RANGE = 0.8;         // tiles, close-range melee
+export const AI_BOSS_ATTACK_DAMAGE = 25;         // per hit
+export const AI_BOSS_ATTACK_COOLDOWN = 1.5;      // seconds between attacks
 
 export enum LatcherState {
   APPROACH = 'approach',
@@ -182,7 +191,7 @@ export class Sprite {
     if (texture) {
       this.textures = [texture];
     }
-    if (type === SpriteType.ENEMY || type === SpriteType.SHOOTER || type === SpriteType.LATCHER) {
+    if (type === SpriteType.ENEMY || type === SpriteType.SHOOTER || type === SpriteType.LATCHER || type === SpriteType.BOSS) {
       this.spawnX = x;
       this.spawnY = y;
       this.aiState = EnemyAIState.IDLE;
@@ -190,10 +199,17 @@ export class Sprite {
   }
 
   /**
-   * Returns true if this sprite is an enemy (ENEMY, SHOOTER, or LATCHER).
+   * Returns true if this sprite is an enemy (ENEMY, SHOOTER, LATCHER, or BOSS).
    */
   public get isEnemy(): boolean {
-    return this.type === SpriteType.ENEMY || this.type === SpriteType.SHOOTER || this.type === SpriteType.LATCHER;
+    return this.type === SpriteType.ENEMY || this.type === SpriteType.SHOOTER || this.type === SpriteType.LATCHER || this.type === SpriteType.BOSS;
+  }
+
+  /**
+   * Returns true if this sprite is a boss enemy.
+   */
+  public get isBoss(): boolean {
+    return this.enemyClass === EnemyClass.BOSS;
   }
 
   /**
@@ -219,7 +235,8 @@ export class Sprite {
       isCollectableSprite(this.type) ||
       this.type === SpriteType.ENEMY ||
       this.type === SpriteType.SHOOTER ||
-      this.type === SpriteType.LATCHER
+      this.type === SpriteType.LATCHER ||
+      this.type === SpriteType.BOSS
     ) {
       this.floatingPhase += deltaTime * 2.0;
     }
