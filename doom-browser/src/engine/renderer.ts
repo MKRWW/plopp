@@ -34,7 +34,7 @@ import { BloodParticle } from './blood-particle';
 import { ENEMY_RADIUS } from './collision';
 import { Minimap } from '../game/minimap';
 import { SoundManager, SoundType } from '../audio/sound';
-import { Level } from './level-gen';
+import { Level, BOSS_STAGE } from './level-gen';
 import {
   initializeSprites as initSpritesFlow,
   beginLevelTransition as beginTransitionFlow,
@@ -1868,6 +1868,16 @@ export class Renderer {
           }
         }
         this.wasExitEPressed = this.input.isKey('KeyE');
+
+        // Boss-Stage Win-Condition: all bosses dead or dying
+        if (this.levelFlowState.stage === BOSS_STAGE) {
+          const bossStillFighting = this.sprites.some(
+            s => s.isBoss && !s.isDying && !s.isDead
+          );
+          if (!bossStillFighting) {
+            this.gameStateManager.transitionTo(GameState.WIN);
+          }
+        }
 
         // Prüfen ob Spieler tot ist
         if (this.player.health <= 0) {

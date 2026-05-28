@@ -16,6 +16,8 @@
 import { TILE } from './world';
 import { SpriteType } from './sprite';
 
+export const BOSS_STAGE = 10;
+
 export type DecorType =
   | SpriteType.BARREL
   | SpriteType.TERMINAL
@@ -877,6 +879,26 @@ export function generateLevel(seed: number, stage: number): Level {
 
     const facing = spawnFacing(spawnRoom, spawn);
 
+    // Boss-Stage: no normal enemies, one boss at exit room, extra loot in spawn
+    let bosses: Vec2[] = [];
+    if (stage === BOSS_STAGE) {
+      enemies.length = 0;
+      shooters.length = 0;
+      latchers.length = 0;
+
+      const exitRoomIdx = exitRoomIndices[0];
+      const exitRoom = rooms[exitRoomIdx];
+      bosses = [{ x: exitRoom.x + exitRoom.w / 2, y: exitRoom.y + exitRoom.h / 2 }];
+
+      const spawnRoom = rooms[spawnRoomIndices[0]];
+      for (let i = 0; i < 3; i++) {
+        ammo.push({ x: spawnRoom.x + 1 + i * 0.7, y: spawnRoom.y + 1 });
+      }
+      for (let i = 0; i < 2; i++) {
+        health.push({ x: spawnRoom.x + 1 + i * 0.7, y: spawnRoom.y + 2 });
+      }
+    }
+
     // Step 3k: return with all new fields
     return {
       stage,
@@ -896,7 +918,7 @@ export function generateLevel(seed: number, stage: number): Level {
       enemies,
       shooters,
       latchers,
-      bosses: [],
+      bosses,
       ammo,
       health,
       secretHealth,
