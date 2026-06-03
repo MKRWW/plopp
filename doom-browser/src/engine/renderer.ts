@@ -126,6 +126,9 @@ export class Renderer {
   // Edge-Detection for TAB (reset after each poll)
   private wasTabLastFrame: boolean = false;
 
+  // Edge-Detection for melee key (KeyV)
+  private meleeKeyWasDown = false;
+
   // Weapon flash feedback
   private weaponFlashTimer: number = 0;
   private weaponFlashName: string = '';
@@ -1195,10 +1198,12 @@ export class Renderer {
       this.drawShotgun(cx, baseY);
     } else if (def.type === WeaponType.ROCKET_LAUNCHER) {
       this.drawRocketLauncher(cx, baseY);
+    } else if (def.type === WeaponType.FIST) {
+      this.drawFist(cx, baseY);
     }
 
     // Muzzle Flash (dispatched per weapon type)
-    if (this.weapon.state === WeaponState.FIRING && this.muzzleFlashTexture) {
+    if (this.weapon.state === WeaponState.FIRING && this.muzzleFlashTexture && !def.isMelee) {
       this.drawMuzzleFlash(cx, baseY, def);
     }
   }
@@ -1447,6 +1452,70 @@ export class Renderer {
     ctx.stroke();
   }
 
+  private drawFist(cx: number, baseY: number): void {
+    const ctx = this.ctx;
+
+    // Arm/forearm extending from bottom-right
+    ctx.fillStyle = '#4a3520';
+    ctx.beginPath();
+    ctx.moveTo(cx + 40, baseY);
+    ctx.lineTo(cx + 15, baseY - 60);
+    ctx.lineTo(cx + 5, baseY - 60);
+    ctx.lineTo(cx - 10, baseY - 60);
+    ctx.lineTo(cx - 15, baseY - 20);
+    ctx.lineTo(cx - 20, baseY);
+    ctx.closePath();
+    ctx.fill();
+
+    // Arm shading
+    ctx.fillStyle = '#3a2515';
+    ctx.fillRect(cx - 12, baseY - 50, 16, 3);
+    ctx.fillRect(cx - 8, baseY - 35, 14, 3);
+    ctx.fillRect(cx - 5, baseY - 20, 12, 3);
+
+    // Glove/hand base (darker leather)
+    ctx.fillStyle = '#3d2b1a';
+    ctx.beginPath();
+    ctx.moveTo(cx - 20, baseY - 85);
+    ctx.lineTo(cx + 15, baseY - 85);
+    ctx.lineTo(cx + 18, baseY - 60);
+    ctx.lineTo(cx + 12, baseY - 55);
+    ctx.lineTo(cx - 18, baseY - 55);
+    ctx.lineTo(cx - 22, baseY - 60);
+    ctx.closePath();
+    ctx.fill();
+
+    // Glove top (knuckle area)
+    ctx.fillStyle = '#4d3b2a';
+    ctx.fillRect(cx - 18, baseY - 82, 32, 5);
+
+    // Knuckle bumps
+    ctx.fillStyle = '#5d4b3a';
+    ctx.beginPath();
+    ctx.arc(cx - 12, baseY - 78, 4, 0, Math.PI * 2);
+    ctx.arc(cx - 2, baseY - 79, 4, 0, Math.PI * 2);
+    ctx.arc(cx + 8, baseY - 78, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Thumb wrapping around
+    ctx.fillStyle = '#4a3520';
+    ctx.beginPath();
+    ctx.moveTo(cx - 22, baseY - 72);
+    ctx.lineTo(cx - 30, baseY - 65);
+    ctx.lineTo(cx - 28, baseY - 58);
+    ctx.lineTo(cx - 18, baseY - 58);
+    ctx.closePath();
+    ctx.fill();
+
+    // Glove stitching
+    ctx.strokeStyle = '#2a1a0a';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx - 16, baseY - 75);
+    ctx.lineTo(cx + 10, baseY - 75);
+    ctx.stroke();
+  }
+
   private drawMuzzleFlash(cx: number, baseY: number, def: import('../game/weapons').WeaponDef): void {
     const ctx = this.ctx;
     if (!this.muzzleFlashTexture) return;
@@ -1559,10 +1628,12 @@ export class Renderer {
 
     // --- Weapon Name + Ammo (unten rechts) ---
     const def = this.inventory.getCurrent();
+    const ammo = this.inventory.getCurrentAmmo();
+    const ammoStr = isFinite(ammo) ? String(ammo) : '∞';
     ctx.textAlign = 'right';
     ctx.font = 'bold 18px monospace';
     ctx.fillStyle = '#ff0';
-    ctx.fillText(`${def.name} — ${this.inventory.getCurrentAmmo()}`, w - 20, h - 30);
+    ctx.fillText(`${def.name} — ${ammoStr}`, w - 20, h - 30);
 
     // --- Score (oben rechts) ---
     ctx.textAlign = 'right';
@@ -1779,6 +1850,16 @@ export class Renderer {
         const wheelUp = this.input.getWheelUp();
         this.input.resetTabFlag();
         this.input.resetWheelFlags();
+
+        // --- Dedicated Melee Key (V) ---
+        const meleeKeyDown = this.input.isKey('KeyV');
+        if (meleeKeyDown && !this.meleeKeyWasDown) {
+          if (this.inventory.switchTo(WeaponType.FIST)) {
+            this.weaponFlashTimer = this.WEAPON_FLASH_DURATION;
+            this.weaponFlashName = this.inventory.getCurrent().name;
+          }
+        }
+        this.meleeKeyWasDown = meleeKeyDown;
 
         let switched = false;
         if (tabPressed || wheelDown) {

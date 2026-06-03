@@ -19,6 +19,7 @@ export enum SoundType {
   ROCKET_EXPLOSION = 'rocketExplosion',
   HEARTBEAT = 'heartbeat',
   AMMO_LOW = 'ammoLow',
+  MELEE = 'melee',
   // Per-class procedural enemy voices
   HUSK_IDLE = 'huskIdle',
   HUSK_ALERT = 'huskAlert',
@@ -213,6 +214,9 @@ export class SoundManager {
       case SoundType.AMMO_LOW:
         this.playAmmoLow();
         break;
+      case SoundType.MELEE:
+        this.playMelee();
+        break;
       case SoundType.HUSK_IDLE:
         this.playHuskIdle(v);
         break;
@@ -298,6 +302,44 @@ export class SoundManager {
     gain.connect(this.masterGain);
     osc.start(t);
     osc.stop(t + 0.13);
+  }
+
+  /**
+   * Melee swing: short filtered noise whoosh + low thud. No tonal gunshot.
+   */
+  private playMelee(): void {
+    if (!this.audioContext || !this.masterGain) return;
+    const t = this.audioContext.currentTime;
+
+    // Whoosh: short noise burst through a lowpass that sweeps down.
+    const bufferSize = Math.floor(this.audioContext.sampleRate * 0.12);
+    const buffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1);
+    const noise = this.audioContext.createBufferSource();
+    noise.buffer = buffer;
+    const lp = this.audioContext.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(1200, t);
+    lp.frequency.exponentialRampToValueAtTime(300, t + 0.1);
+    const ng = this.audioContext.createGain();
+    ng.gain.setValueAtTime(0.0001, t);
+    ng.gain.exponentialRampToValueAtTime(0.25, t + 0.015);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.11);
+    noise.connect(lp); lp.connect(ng); ng.connect(this.masterGain);
+    noise.start(t); noise.stop(t + 0.12);
+
+    // Low thud on impact.
+    const osc = this.audioContext.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(110, t);
+    osc.frequency.exponentialRampToValueAtTime(55, t + 0.1);
+    const og = this.audioContext.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.3, t + 0.02);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.11);
+    osc.connect(og); og.connect(this.masterGain);
+    osc.start(t); osc.stop(t + 0.12);
   }
 
   /**

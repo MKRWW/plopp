@@ -1,0 +1,26 @@
+# Delegate config for aiDoom / Plopp.
+# User = PO, Claude = architect + reviewer, local hermes+qwen3.6 (on Zuse, via WSL) = coder.
+#
+# Environment notes:
+#  - hermes runs in WSL/Ubuntu: /home/markus/.local/bin/hermes, default model qwen3.6-27b
+#    (Custom endpoint -> Zuse vLLM). One-shot mode is `hermes --yolo -z "<prompt>"`.
+#  - The repo lives on the Windows D: drive; WSL sees it at /mnt/d/...
+#  - node_modules was installed under Linux, so vitest (rolldown native binding) only runs
+#    in WSL. The vite build runs fine on the Windows host.
+#  - {spec} is substituted by the driver with the WSL (/mnt/...) path to the spec file.
+
+[agent]
+launch = "wsl -e bash -lc \"cd /mnt/d/Development/Sources/Fun/aiDoom/doom-browser && hermes --yolo -z 'Read the increment spec at {spec} and implement it COMPLETELY and EXACTLY as written, including the Do NOT list. Only touch files in the spec Files list. When finished, run npm test, then show git status and git --no-pager diff --stat output 1:1.'\""
+background = true
+
+[gate]
+# Claude runs these itself. Build on Windows host; tests in WSL (rolldown linux binding only).
+lint = "npm run build"
+test = "wsl -e bash -lc \"cd /mnt/d/Development/Sources/Fun/aiDoom/doom-browser && npm test\""
+
+[git]
+spec_dir = "tasks"
+branch_prefix = "wip/"
+
+[review]
+max_retries = 2
