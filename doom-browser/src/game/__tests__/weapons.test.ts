@@ -3,7 +3,7 @@ import { WeaponType, WeaponInventory, WEAPONS } from '../weapons';
 import { SoundType } from '../../audio/sound';
 
 describe('WeaponInventory - Initial State', () => {
-  it('starts with one weapon (pistol) on construction', () => {
+  it('starts with pistol as current weapon on construction', () => {
     const inv = new WeaponInventory();
     expect(inv.getCurrent().type).toBe(WeaponType.PISTOL);
   });
@@ -33,6 +33,16 @@ describe('WeaponInventory - Initial State', () => {
     expect(inv.hasWeapon(WeaponType.SHOTGUN)).toBe(false);
     expect(inv.hasWeapon(WeaponType.ROCKET_LAUNCHER)).toBe(false);
   });
+
+  it('hasWeapon returns true for fist on fresh inventory', () => {
+    const inv = new WeaponInventory();
+    expect(inv.hasWeapon(WeaponType.FIST)).toBe(true);
+  });
+
+  it('getWeaponCount() is 2 on fresh inventory (pistol + fist)', () => {
+    const inv = new WeaponInventory();
+    expect(inv.getWeaponCount()).toBe(2);
+  });
 });
 
 describe('WeaponInventory - Fire', () => {
@@ -46,9 +56,15 @@ describe('WeaponInventory - Fire', () => {
 
   it('fire() returns false with zero ammo', () => {
     const inv = new WeaponInventory();
-    while (inv.getCurrentAmmo() > 0) {
+    // Drain all ammo; clear the cooldown each iteration so fire() actually
+    // consumes a round (a bare while(ammo>0) loop would spin forever because
+    // fire() refuses while the cooldown is still ticking).
+    for (let i = 0; i < WEAPONS[0].startAmmo; i++) {
+      inv.update(1);
       inv.fire();
     }
+    expect(inv.getCurrentAmmo()).toBe(0);
+    inv.update(1); // clear cooldown so the final fire() fails on ammo, not cooldown
     const result = inv.fire();
     expect(result).toBe(false);
   });
@@ -135,15 +151,17 @@ describe('WeaponInventory - addAmmo', () => {
 });
 
 describe('WeaponInventory - reset', () => {
-  it('resets to a single pistol with startAmmo', () => {
+  it('resets to pistol + fist with startAmmo', () => {
     const inv = new WeaponInventory();
     inv.addWeapon(WEAPONS[1]);
     inv.addWeapon(WEAPONS[2]);
     inv.kills = 5;
     inv.reset();
+    expect(inv.getWeaponCount()).toBe(2);
     expect(inv.getCurrent().type).toBe(WeaponType.PISTOL);
     expect(inv.getCurrentAmmo()).toBe(WEAPONS[0].startAmmo);
     expect(inv.kills).toBe(0);
+    expect(inv.hasWeapon(WeaponType.FIST)).toBe(true);
     expect(inv.hasWeapon(WeaponType.SHOTGUN)).toBe(false);
     expect(inv.hasWeapon(WeaponType.ROCKET_LAUNCHER)).toBe(false);
   });
@@ -172,12 +190,69 @@ describe('WEAPONS - definitions', () => {
     expect(WEAPONS[0].isProjectile).toBe(false);
     expect(WEAPONS[1].isProjectile).toBe(false);
     expect(WEAPONS[2].isProjectile).toBe(true);
+    expect(WEAPONS[3].isProjectile).toBe(false);
   });
 
   it('rocket has projectileSpeed, explosionRadius, explosionDamage', () => {
     expect(WEAPONS[2].projectileSpeed).toBe(12);
     expect(WEAPONS[2].explosionRadius).toBe(1.5);
     expect(WEAPONS[2].explosionDamage).toBe(10);
+  });
+
+  it('WEAPONS[3] is FIST with correct melee properties', () => {
+    expect(WEAPONS[3].type).toBe(WeaponType.FIST);
+    expect(WEAPONS[3].isMelee).toBe(true);
+    expect(WEAPONS[3].infiniteAmmo).toBe(true);
+    expect(WEAPONS[3].meleeRange).toBe(1.3);
+    expect(WEAPONS[3].fireSound).toBe(SoundType.MELEE);
+  });
+});
+
+describe('WeaponInventory - Fist / melee', () => {
+  it('switchTo(FIST) returns true and makes getCurrent().type === FIST', () => {
+    const inv = new WeaponInventory();
+    const result = inv.switchTo(WeaponType.FIST);
+    expect(result).toBe(true);
+    expect(inv.getCurrent().type).toBe(WeaponType.FIST);
+  });
+
+  it('after switchTo(FIST): getCurrentAmmo() is Infinity; fire() works; cooldown blocks; ammo never decrements', () => {
+    const inv = new WeaponInventory();
+    inv.switchTo(WeaponType.FIST);
+    expect(inv.getCurrentAmmo()).toBe(Infinity);
+    expect(inv.fire()).toBe(true);
+    expect(inv.fire()).toBe(false); // cooldown
+    inv.update(0.6);
+    expect(inv.fire()).toBe(true);
+    expect(inv.getCurrentAmmo()).toBe(Infinity); // never decremented
+  });
+
+  it('on fresh inventory [pistol, fist], switchNext() and switchPrev() both return false', () => {
+    const inv = new WeaponInventory();
+    const nextResult = inv.switchNext();
+    const prevResult = inv.switchPrev();
+    expect(nextResult).toBe(false);
+    expect(prevResult).toBe(false);
+    expect(inv.getCurrent().type).toBe(WeaponType.PISTOL);
+  });
+
+  it('with shotgun added, cycling never lands on FIST', () => {
+    const inv = new WeaponInventory();
+    inv.addWeapon(WEAPONS[1]); // [PISTOL, FIST, SHOTGUN]
+    inv.switchTo(WeaponType.PISTOL);
+    inv.switchNext();
+    expect(inv.getCurrent().type).toBe(WeaponType.SHOTGUN);
+    inv.switchNext();
+    expect(inv.getCurrent().type).toBe(WeaponType.PISTOL);
+    expect(inv.getCurrent().type).not.toBe(WeaponType.FIST);
+  });
+
+  it('addAmmo() is no-op for infiniteAmmo current weapon', () => {
+    const inv = new WeaponInventory();
+    inv.switchTo(WeaponType.FIST);
+    const before = inv.getCurrentAmmo();
+    inv.addAmmo(10);
+    expect(inv.getCurrentAmmo()).toBe(before); // still Infinity
   });
 });
 
@@ -221,11 +296,11 @@ describe('WeaponInventory - switchNext / switchPrev', () => {
 
   it('getWeaponCount() returns correct length', () => {
     const inv = new WeaponInventory();
-    expect(inv.getWeaponCount()).toBe(1);
-    inv.addWeapon(WEAPONS[1]);
     expect(inv.getWeaponCount()).toBe(2);
-    inv.addWeapon(WEAPONS[2]);
+    inv.addWeapon(WEAPONS[1]);
     expect(inv.getWeaponCount()).toBe(3);
+    inv.addWeapon(WEAPONS[2]);
+    expect(inv.getWeaponCount()).toBe(4);
   });
 
   it('switchNext() returns true with multiple weapons', () => {

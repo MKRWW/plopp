@@ -3,7 +3,8 @@ import { SoundType } from '../audio/sound';
 export enum WeaponType {
   PISTOL = 'pistol',
   SHOTGUN = 'shotgun',
-  ROCKET_LAUNCHER = 'rocket_launcher'
+  ROCKET_LAUNCHER = 'rocket_launcher',
+  FIST = 'fist'
 }
 
 export interface WeaponDef {
@@ -22,6 +23,9 @@ export interface WeaponDef {
   projectileSpeed?: number;
   explosionRadius?: number;
   explosionDamage?: number;
+  isMelee?: boolean;
+  meleeRange?: number;
+  infiniteAmmo?: boolean;
 }
 
 export class WeaponInventory {
@@ -31,6 +35,8 @@ export class WeaponInventory {
 
   constructor() {
     this.weapons.push({ def: WEAPONS[0], ammo: WEAPONS[0].startAmmo, fireCooldown: 0 });
+    this.weapons.push({ def: WEAPONS[3], ammo: WEAPONS[3].startAmmo, fireCooldown: 0 }); // FIST
+    this.current = 0;
   }
 
   addWeapon(def: WeaponDef): void {
@@ -52,16 +58,19 @@ export class WeaponInventory {
     return false;
   }
 
-  switchNext(): boolean {
-    if (this.weapons.length <= 1) return false;
-    this.current = (this.current + 1) % this.weapons.length;
-    return true;
-  }
+  switchNext(): boolean { return this.cycle(1); }
+  switchPrev(): boolean { return this.cycle(-1); }
 
-  switchPrev(): boolean {
-    if (this.weapons.length <= 1) return false;
-    this.current = (this.current - 1 + this.weapons.length) % this.weapons.length;
-    return true;
+  private cycle(dir: number): boolean {
+    const n = this.weapons.length;
+    for (let step = 1; step < n; step++) {
+      const idx = (((this.current + dir * step) % n) + n) % n;
+      if (!this.weapons[idx].def.isMelee) {
+        this.current = idx;
+        return true;
+      }
+    }
+    return false;
   }
 
   getWeaponCount(): number {
@@ -73,7 +82,8 @@ export class WeaponInventory {
   }
 
   getCurrentAmmo(): number {
-    return this.weapons[this.current].ammo;
+    const w = this.weapons[this.current];
+    return w.def.infiniteAmmo ? Infinity : w.ammo;
   }
 
   getMaxAmmo(): number {
@@ -82,8 +92,11 @@ export class WeaponInventory {
 
   fire(): boolean {
     const w = this.weapons[this.current];
-    if (w.ammo <= 0 || w.fireCooldown > 0) return false;
-    w.ammo--;
+    if (w.fireCooldown > 0) return false;
+    if (!w.def.infiniteAmmo) {
+      if (w.ammo <= 0) return false;
+      w.ammo--;
+    }
     w.fireCooldown = w.def.fireCooldown;
     return true;
   }
@@ -95,7 +108,9 @@ export class WeaponInventory {
   }
 
   addAmmo(amount: number): void {
-    this.weapons[this.current].ammo = Math.min(this.weapons[this.current].def.maxAmmo, this.weapons[this.current].ammo + amount);
+    const w = this.weapons[this.current];
+    if (w.def.infiniteAmmo) return;
+    w.ammo = Math.min(w.def.maxAmmo, w.ammo + amount);
   }
 
   hasWeapon(type: WeaponType): boolean {
@@ -103,7 +118,10 @@ export class WeaponInventory {
   }
 
   reset(): void {
-    this.weapons = [{ def: WEAPONS[0], ammo: WEAPONS[0].startAmmo, fireCooldown: 0 }];
+    this.weapons = [
+      { def: WEAPONS[0], ammo: WEAPONS[0].startAmmo, fireCooldown: 0 },
+      { def: WEAPONS[3], ammo: WEAPONS[3].startAmmo, fireCooldown: 0 } // FIST
+    ];
     this.current = 0;
     this.kills = 0;
   }
@@ -154,5 +172,22 @@ export const WEAPONS: WeaponDef[] = [
     projectileSpeed: 12,
     explosionRadius: 1.5,
     explosionDamage: 10
+  },
+  {
+    type: WeaponType.FIST,
+    name: 'FIST',
+    damage: 2,
+    fireCooldown: 0.5,
+    flashDuration: 0.12,
+    startAmmo: 0,
+    maxAmmo: 0,
+    recoilY: -18,
+    recoilXSpread: 4,
+    screenShake: 2,
+    fireSound: SoundType.MELEE,
+    isProjectile: false,
+    isMelee: true,
+    meleeRange: 1.3,
+    infiniteAmmo: true
   }
 ];

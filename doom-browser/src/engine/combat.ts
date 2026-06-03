@@ -47,6 +47,8 @@ export function handlePlayerShoot(ctx: CombatContext): void {
   // Fire sound per weapon
   if (def.type === WeaponType.ROCKET_LAUNCHER) {
     ctx.soundManager.play(SoundType.ROCKET_SHOOT);
+  } else if (def.isMelee) {
+    ctx.soundManager.play(SoundType.MELEE);
   } else {
     ctx.soundManager.play(SoundType.SHOOT);
   }
@@ -70,7 +72,7 @@ export function handlePlayerShoot(ctx: CombatContext): void {
   }
 
   // Hitscan weapons: raycast in player direction
-  const hit = checkShotHit(ctx);
+  const hit = checkShotHit(ctx, def.isMelee ? (def.meleeRange ?? 1.3) : Infinity);
   if (hit) {
     hit.health -= def.damage;
 
@@ -113,7 +115,7 @@ export function handlePlayerShoot(ctx: CombatContext): void {
  * Prüft ob ein Schuss (in Blickrichtung) einen Gegner-Sprite trifft.
  * Gibt den getroffenen Sprite zurück oder null.
  */
-export function checkShotHit(ctx: CombatContext): Sprite | null {
+export function checkShotHit(ctx: CombatContext, maxRange: number = Infinity): Sprite | null {
   const px = ctx.player.x;
   const py = ctx.player.y;
   const dirX = ctx.player.dirX;
@@ -141,7 +143,7 @@ export function checkShotHit(ctx: CombatContext): Sprite | null {
     const offset = Math.sqrt((sprite.x - projX) ** 2 + (sprite.y - projY) ** 2);
 
     // Treffer wenn nah genug an der Blicklinie (Sprite-Radius ~0.4 Tiles)
-    if (offset < 0.4 && dist < closestDist) {
+    if (offset < 0.4 && dist <= maxRange && dist < closestDist) {
       closestDist = dist;
       closestSprite = sprite;
     }
