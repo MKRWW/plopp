@@ -27,6 +27,22 @@ export interface CombatContext {
   // Visual-only damage flash (no sound) — used by rocket explosion which has
   // its own explosion SFX.
   flashCameraNoSound: () => void;
+  // Berserk timer for damage multiplier
+  berserkTimer: number;
+}
+
+/**
+ * Applies damage to the player, absorbing through armor first.
+ */
+export function applyPlayerDamage(player: Player, rawDamage: number): void {
+  if (player.armor > 0) {
+    const absorbed = Math.min(player.armor, rawDamage);
+    player.armor -= absorbed;
+    rawDamage -= absorbed;
+  }
+  if (rawDamage > 0) {
+    player.health -= rawDamage;
+  }
 }
 
 /**
@@ -36,6 +52,7 @@ export function handlePlayerShoot(ctx: CombatContext): void {
   if (!ctx.inventory.fire()) return;
 
   const def = ctx.inventory.getCurrent();
+  const berserkMult = ctx.berserkTimer > 0 ? 2 : 1;
 
   // Set per-weapon animation state on Weapon
   ctx.weapon.triggerFire(
@@ -64,7 +81,7 @@ export function handlePlayerShoot(ctx: CombatContext): void {
       ctx.player.dirX, ctx.player.dirY,
       rocketSpeed, 4,
       def.explosionRadius ?? 1.5,
-      def.explosionDamage ?? 10
+      (def.explosionDamage ?? 10) * berserkMult
     );
     ctx.rockets.push(rocket);
     ctx.broadcastGunshot();
@@ -74,7 +91,7 @@ export function handlePlayerShoot(ctx: CombatContext): void {
   // Hitscan weapons: raycast in player direction
   const hit = checkShotHit(ctx, def.isMelee ? (def.meleeRange ?? 1.3) : Infinity);
   if (hit) {
-    hit.health -= def.damage;
+    hit.health -= def.damage * berserkMult;
 
     hit.hitFlashTimer = 0.12;
 
@@ -270,7 +287,7 @@ export function updateBioProjectiles(ctx: CombatContext, deltaTime: number): voi
       const pdy = py - proj.y;
       const pDist = Math.sqrt(pdx * pdx + pdy * pdy);
       if (pDist < 0.5) {
-        ctx.player.health -= proj.damage;
+        applyPlayerDamage(ctx.player, proj.damage);
         ctx.triggerDamageFlash();
         proj.hasDamaged = true;
         proj.triggerSplat();

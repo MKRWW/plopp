@@ -35,7 +35,9 @@ export enum SpriteType {
   LAMP = 'lamp',
   DEBRIS = 'debris',
   WEAPON_SHOTGUN = 'weapon_shotgun',
-  WEAPON_ROCKETLAUNCHER = 'weapon_rocketlauncher'
+  WEAPON_ROCKETLAUNCHER = 'weapon_rocketlauncher',
+  ARMOR = 'armor',
+  BERSERK = 'berserk'
 }
 
 /**
@@ -49,7 +51,9 @@ export function isCollectableSprite(type: SpriteType): boolean {
     type === SpriteType.KEYCARD ||
     type === SpriteType.YELLOW_KEYCARD ||
     type === SpriteType.WEAPON_SHOTGUN ||
-    type === SpriteType.WEAPON_ROCKETLAUNCHER
+    type === SpriteType.WEAPON_ROCKETLAUNCHER ||
+    type === SpriteType.ARMOR ||
+    type === SpriteType.BERSERK
   );
 }
 

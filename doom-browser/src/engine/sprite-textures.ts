@@ -127,6 +127,10 @@ export function generateSpriteTextures(): SpriteTextureSet {
    flat.set(SpriteType.WEAPON_SHOTGUN, buildRotatingItemFrames(generateShotgunFront, generateShotgunBack));
    flat.set(SpriteType.WEAPON_ROCKETLAUNCHER, buildRotatingItemFrames(generateRocketLauncherFront, generateRocketLauncherBack));
 
+   // Powerup pickups: 8-frame rotating sprites
+   flat.set(SpriteType.ARMOR, buildRotatingItemFrames(generateArmorFront, generateArmorBack));
+   flat.set(SpriteType.BERSERK, buildRotatingItemFrames(generateBerserkFront, generateBerserkBack));
+
    // Decor (single frame, no shadow baked in)
    flat.set(SpriteType.BARREL, [generateBarrelTexture()]);
    flat.set(SpriteType.TERMINAL, [generateTerminalTexture()]);
@@ -2780,6 +2784,180 @@ function generateRocketLauncherBack(): Texture {
   ctx.save();
   ctx.globalCompositeOperation = 'source-atop';
   ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+  ctx.fillRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+  ctx.restore();
+
+  return texFromCanvas(canvas, ctx);
+}
+
+/* ------------------------------------------------------------------ */
+/* Powerup pickup textures: Armor (cyan shield) + Berserk (red star)  */
+/* ------------------------------------------------------------------ */
+
+function generateArmorFront(): Texture {
+  const canvas = document.createElement('canvas');
+  canvas.width = SPRITE_TEXTURE_SIZE;
+  canvas.height = SPRITE_TEXTURE_SIZE;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+  const cx = 32, cy = 32;
+
+  // Shield shape: inverted pentagon (flat top, pointed bottom)
+  ctx.fillStyle = '#0cc';
+  ctx.beginPath();
+  ctx.moveTo(cx - 18, cy - 14);
+  ctx.lineTo(cx + 18, cy - 14);
+  ctx.lineTo(cx + 18, cy + 2);
+  ctx.lineTo(cx, cy + 18);
+  ctx.lineTo(cx - 18, cy + 2);
+  ctx.closePath();
+  ctx.fill();
+
+  // Darker border
+  ctx.strokeStyle = '#066';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Upper-left highlight
+  ctx.fillStyle = '#0ff';
+  ctx.globalAlpha = 0.4;
+  ctx.beginPath();
+  ctx.moveTo(cx - 14, cy - 10);
+  ctx.lineTo(cx - 2, cy - 10);
+  ctx.lineTo(cx - 2, cy);
+  ctx.lineTo(cx - 14, cy + 2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // Center cross (shield emblem)
+  ctx.strokeStyle = '#066';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - 8);
+  ctx.lineTo(cx, cy + 10);
+  ctx.moveTo(cx - 8, cy - 2);
+  ctx.lineTo(cx + 8, cy - 2);
+  ctx.stroke();
+
+  return texFromCanvas(canvas, ctx);
+}
+
+function generateArmorBack(): Texture {
+  const canvas = document.createElement('canvas');
+  canvas.width = SPRITE_TEXTURE_SIZE;
+  canvas.height = SPRITE_TEXTURE_SIZE;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+  const cx = 32, cy = 32;
+
+  // Shield back: darker
+  ctx.fillStyle = '#066';
+  ctx.beginPath();
+  ctx.moveTo(cx - 18, cy - 14);
+  ctx.lineTo(cx + 18, cy - 14);
+  ctx.lineTo(cx + 18, cy + 2);
+  ctx.lineTo(cx, cy + 18);
+  ctx.lineTo(cx - 18, cy + 2);
+  ctx.closePath();
+  ctx.fill();
+
+  // Rivet details
+  ctx.fillStyle = '#099';
+  ctx.beginPath(); ctx.arc(cx - 12, cy - 8, 1.5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx + 12, cy - 8, 1.5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx - 8, cy + 8, 1.5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx + 8, cy + 8, 1.5, 0, Math.PI * 2); ctx.fill();
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+  ctx.restore();
+
+  return texFromCanvas(canvas, ctx);
+}
+
+function generateBerserkFront(): Texture {
+  const canvas = document.createElement('canvas');
+  canvas.width = SPRITE_TEXTURE_SIZE;
+  canvas.height = SPRITE_TEXTURE_SIZE;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+  const cx = 32, cy = 32;
+
+  // 4-pointed star
+  ctx.fillStyle = '#f22';
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - 22);
+  ctx.lineTo(cx + 6, cy - 6);
+  ctx.lineTo(cx + 22, cy);
+  ctx.lineTo(cx + 6, cy + 6);
+  ctx.lineTo(cx, cy + 22);
+  ctx.lineTo(cx - 6, cy + 6);
+  ctx.lineTo(cx - 22, cy);
+  ctx.lineTo(cx - 6, cy - 6);
+  ctx.closePath();
+  ctx.fill();
+
+  // Darker border
+  ctx.strokeStyle = '#a00';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Bright center
+  ctx.fillStyle = '#f88';
+  ctx.beginPath();
+  ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Radiating lines for "power" feel
+  ctx.strokeStyle = '#f88';
+  ctx.lineWidth = 1.5;
+  const angles = [-0.6, 0, 0.6];
+  for (const a of angles) {
+    for (const dir of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.sin(a) * 8, cy + dir * 8 * Math.cos(a));
+      ctx.lineTo(cx + Math.sin(a) * 16, cy + dir * 16 * Math.cos(a));
+      ctx.stroke();
+    }
+  }
+
+  return texFromCanvas(canvas, ctx);
+}
+
+function generateBerserkBack(): Texture {
+  const canvas = document.createElement('canvas');
+  canvas.width = SPRITE_TEXTURE_SIZE;
+  canvas.height = SPRITE_TEXTURE_SIZE;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
+  const cx = 32, cy = 32;
+
+  // Back: darker star
+  ctx.fillStyle = '#a00';
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - 22);
+  ctx.lineTo(cx + 6, cy - 6);
+  ctx.lineTo(cx + 22, cy);
+  ctx.lineTo(cx + 6, cy + 6);
+  ctx.lineTo(cx, cy + 22);
+  ctx.lineTo(cx - 6, cy + 6);
+  ctx.lineTo(cx - 22, cy);
+  ctx.lineTo(cx - 6, cy - 6);
+  ctx.closePath();
+  ctx.fill();
+
+  // Center dimmer
+  ctx.fillStyle = '#c44';
+  ctx.beginPath();
+  ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
   ctx.fillRect(0, 0, SPRITE_TEXTURE_SIZE, SPRITE_TEXTURE_SIZE);
   ctx.restore();
 

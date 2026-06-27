@@ -221,6 +221,24 @@ export function initializeSprites(ctx: LevelFlowContext, level: Level): void {
     ctx.sprites.push(s);
   }
 
+  // Secret Berserk (replaces secret health 50% of the time)
+  if (level.secretBerserk) {
+    const berserkTextures = flat.get(SpriteType.BERSERK);
+    const s = new Sprite(level.secretBerserk.x, level.secretBerserk.y, SpriteType.BERSERK, berserkTextures?.[0] ?? null);
+    if (berserkTextures) s.textures = berserkTextures;
+    s.animationSpeed = 0.12;
+    ctx.sprites.push(s);
+  }
+
+  // Armor pickups
+  const armorTextures = flat.get(SpriteType.ARMOR);
+  for (const pos of level.armorPickups) {
+    const s = new Sprite(pos.x, pos.y, SpriteType.ARMOR, armorTextures?.[0] ?? null);
+    if (armorTextures) s.textures = armorTextures;
+    s.animationSpeed = 0.12;
+    ctx.sprites.push(s);
+  }
+
   // Decor
   for (const d of level.decor) {
     const tex = decorTextures[d.type];

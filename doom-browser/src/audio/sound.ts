@@ -26,7 +26,9 @@ export enum SoundType {
   SPITTER_IDLE = 'spitterIdle',
   SPITTER_ALERT = 'spitterAlert',
   LATCHER_IDLE = 'latcherIdle',
-  LATCHER_ALERT = 'latcherAlert'
+  LATCHER_ALERT = 'latcherAlert',
+  POWERUP_ARMOR = 'powerupArmor',
+  POWERUP_BERSERK = 'powerupBerserk'
 }
 
 /**
@@ -234,6 +236,12 @@ export class SoundManager {
         break;
       case SoundType.LATCHER_ALERT:
         this.playLatcherAlert(v);
+        break;
+      case SoundType.POWERUP_ARMOR:
+        this.playPowerupArmor();
+        break;
+      case SoundType.POWERUP_BERSERK:
+        this.playPowerupBerserk();
         break;
     }
   }
@@ -909,5 +917,97 @@ export class SoundManager {
     gain.connect(this.masterGain);
     osc.start(t);
     osc.stop(t + 0.22);
+  }
+
+  /**
+   * Powerup Armor: bright ping with undertone (~300ms).
+   */
+  private playPowerupArmor(): void {
+    if (!this.audioContext || !this.masterGain) return;
+    const t = this.audioContext.currentTime;
+
+    // Main sine: 880Hz exponential ramp down to 440Hz over 200ms
+    const osc1 = this.audioContext.createOscillator();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(880, t);
+    osc1.frequency.exponentialRampToValueAtTime(440, t + 0.2);
+    const gain1 = this.audioContext.createGain();
+    gain1.gain.setValueAtTime(0.0001, t);
+    gain1.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
+    gain1.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+    osc1.connect(gain1);
+    gain1.connect(this.masterGain);
+    osc1.start(t);
+    osc1.stop(t + 0.3);
+
+    // Shimmer: second sine at 1320Hz (fifth above) at lower gain
+    const osc2 = this.audioContext.createOscillator();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(1320, t);
+    osc2.frequency.exponentialRampToValueAtTime(660, t + 0.2);
+    const gain2 = this.audioContext.createGain();
+    gain2.gain.setValueAtTime(0.0001, t);
+    gain2.gain.exponentialRampToValueAtTime(0.1, t + 0.01);
+    gain2.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+    osc2.connect(gain2);
+    gain2.connect(this.masterGain);
+    osc2.start(t);
+    osc2.stop(t + 0.27);
+  }
+
+  /**
+   * Powerup Berserk: deep drone + staccato rise (~400ms).
+   */
+  private playPowerupBerserk(): void {
+    if (!this.audioContext || !this.masterGain) return;
+    const t = this.audioContext.currentTime;
+
+    // Rising drone: 110Hz → 220Hz over 300ms
+    const osc1 = this.audioContext.createOscillator();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(110, t);
+    osc1.frequency.linearRampToValueAtTime(220, t + 0.3);
+    const gain1 = this.audioContext.createGain();
+    gain1.gain.setValueAtTime(0.0001, t);
+    gain1.gain.exponentialRampToValueAtTime(0.25, t + 0.05);
+    gain1.gain.setValueAtTime(0.25, t + 0.2);
+    gain1.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+    osc1.connect(gain1);
+    gain1.connect(this.masterGain);
+    osc1.start(t);
+    osc1.stop(t + 0.4);
+
+    // Sub-bass rumble: 55Hz square for full 400ms
+    const osc2 = this.audioContext.createOscillator();
+    osc2.type = 'square';
+    osc2.frequency.setValueAtTime(55, t);
+    const gain2 = this.audioContext.createGain();
+    gain2.gain.setValueAtTime(0.0001, t);
+    gain2.gain.exponentialRampToValueAtTime(0.08, t + 0.05);
+    gain2.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+    osc2.connect(gain2);
+    gain2.connect(this.masterGain);
+    osc2.start(t);
+    osc2.stop(t + 0.4);
+
+    // 3 staccato noise bursts at t+50ms, t+150ms, t+250ms
+    for (let i = 0; i < 3; i++) {
+      const burstTime = t + 0.05 + i * 0.1;
+      const bufferSize = Math.floor(this.audioContext.sampleRate * 0.03);
+      const buffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let j = 0; j < bufferSize; j++) {
+        data[j] = (Math.random() * 2 - 1) * Math.exp(-j / (bufferSize * 0.15));
+      }
+      const noise = this.audioContext.createBufferSource();
+      noise.buffer = buffer;
+      const nGain = this.audioContext.createGain();
+      nGain.gain.setValueAtTime(0.15, burstTime);
+      nGain.gain.exponentialRampToValueAtTime(0.001, burstTime + 0.03);
+      noise.connect(nGain);
+      nGain.connect(this.masterGain);
+      noise.start(burstTime);
+      noise.stop(burstTime + 0.04);
+    }
   }
 }

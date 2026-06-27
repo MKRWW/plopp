@@ -134,6 +134,10 @@ export class Renderer {
   private weaponFlashName: string = '';
   private readonly WEAPON_FLASH_DURATION: number = 1.5;
 
+  // Powerup state
+  private berserkTimer: number = 0;
+  private readonly BERSERK_DURATION: number = 10; // seconds
+
   // Procedural Levels: Seed, Stage, aktuelles Level und Loading-Zustand
   // werden jetzt in levelFlowState gebündelt (siehe level-flow.ts).
   private levelFlowState: LevelFlowState;
@@ -286,6 +290,19 @@ export class Renderer {
           this.inventory.addWeapon(WEAPONS[1]);
         } else if (sprite.type === SpriteType.WEAPON_ROCKETLAUNCHER) {
           this.inventory.addWeapon(WEAPONS[2]);
+        } else if (sprite.type === SpriteType.ARMOR) {
+          if (this.player.armor < 100) {
+            this.player.armor = Math.min(100, this.player.armor + 50);
+            this.soundManager.play(SoundType.POWERUP_ARMOR);
+            this.sprites.splice(i, 1);
+          }
+          continue; // don't play the default PICKUP sound
+        } else if (sprite.type === SpriteType.BERSERK) {
+          this.berserkTimer = this.BERSERK_DURATION;
+          this.player.score += 200;
+          this.soundManager.play(SoundType.POWERUP_BERSERK);
+          this.sprites.splice(i, 1);
+          continue; // don't play the default PICKUP sound
         }
         this.soundManager.play(SoundType.PICKUP);
         this.sprites.splice(i, 1);
@@ -335,6 +352,7 @@ export class Renderer {
       flashCameraNoSound: () => {
         this.effectsState.damageFlashTimer = this.effectsState.damageFlashDuration;
       },
+      berserkTimer: this.berserkTimer,
     };
   }
 
@@ -1626,6 +1644,25 @@ export class Renderer {
     ctx.textAlign = 'left';
     ctx.fillText(`HP ${this.player.health}`, healthBarX + 5, healthBarY + 15);
 
+    // --- Armor Bar (below health bar) ---
+    if (this.player.armor > 0) {
+      const armorBarX = 20;
+      const armorBarY = h - 28;
+      const armorBarW = 200;
+      const armorBarH = 12;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(armorBarX - 2, armorBarY - 2, armorBarW + 4, armorBarH + 4);
+      ctx.fillStyle = '#033';
+      ctx.fillRect(armorBarX, armorBarY, armorBarW, armorBarH);
+      const armorPct = this.player.armor / 100;
+      ctx.fillStyle = '#0cc';
+      ctx.fillRect(armorBarX, armorBarY, armorBarW * armorPct, armorBarH);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 10px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(`ARMOR ${this.player.armor}`, armorBarX + 5, armorBarY + 10);
+    }
+
     // --- Weapon Name + Ammo (unten rechts) ---
     const def = this.inventory.getCurrent();
     const ammo = this.inventory.getCurrentAmmo();
@@ -1667,6 +1704,12 @@ export class Renderer {
         if (sprite.type === SpriteType.KEYCARD) {
           ctx.fillStyle = '#5af';
           ctx.fillText('[E] KEYCARD einsammeln', w / 2, 60);
+        } else if (sprite.type === SpriteType.ARMOR) {
+          ctx.fillStyle = '#0cc';
+          ctx.fillText('[E] ARMOR einsammeln', w / 2, 60);
+        } else if (sprite.type === SpriteType.BERSERK) {
+          ctx.fillStyle = '#f44';
+          ctx.fillText('[E] BERSERK einsammeln', w / 2, 60);
         } else {
           ctx.fillStyle = sprite.type === SpriteType.AMMO ? '#ff0' : '#0f0';
           const itemName = sprite.type === SpriteType.AMMO ? 'AMMO' : 'HEALTH';
@@ -1763,6 +1806,25 @@ export class Renderer {
       ctx.shadowBlur = 0;
     }
 
+    // --- Berserk active overlay ---
+    if (this.berserkTimer > 0) {
+      // Red border glow
+      const alpha = Math.min(0.4, this.berserkTimer / this.BERSERK_DURATION * 0.4);
+      ctx.strokeStyle = `rgba(255, 0, 0, ${alpha})`;
+      ctx.lineWidth = 6;
+      ctx.strokeRect(3, 3, w - 6, h - 6);
+      ctx.lineWidth = 1;
+
+      // Countdown text (top center)
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 22px monospace';
+      ctx.fillStyle = `rgba(255, 60, 60, ${0.7 + 0.3 * Math.sin(performance.now() / 150)})`;
+      ctx.shadowColor = '#f00';
+      ctx.shadowBlur = 12;
+      ctx.fillText(`BERSERK ${this.berserkTimer.toFixed(1)}`, w / 2, 25);
+      ctx.shadowBlur = 0;
+    }
+
     ctx.textAlign = 'left';
   }
 
@@ -1809,6 +1871,8 @@ export class Renderer {
         this.doorMessageTimer = 0;
         this.weaponFlashTimer = 0;
         this.weaponFlashName = '';
+        this.berserkTimer = 0;
+        this.player.armor = 0;
       }
       previousState = gameState;
 
@@ -1830,6 +1894,8 @@ export class Renderer {
           this.keycardPickupMessage = 0;
           this.doorMessage = '';
           this.doorMessageTimer = 0;
+          this.berserkTimer = 0;
+          this.player.armor = 0;
         }
       }
 
@@ -1992,6 +2058,11 @@ export class Renderer {
       // Keycard Pickup Message Timer
       if (this.keycardPickupMessage > 0) {
         this.keycardPickupMessage -= deltaTime;
+      }
+
+      // Berserk Timer
+      if (this.berserkTimer > 0) {
+        this.berserkTimer = Math.max(0, this.berserkTimer - deltaTime);
       }
 
       // Door Message Timer

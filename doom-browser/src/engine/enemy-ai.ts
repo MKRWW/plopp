@@ -34,6 +34,7 @@ import {
 import { Player } from '../player/player';
 import { BioProjectile } from './bio-projectile';
 import { SoundManager, SoundType } from '../audio/sound';
+import { applyPlayerDamage } from './combat';
 import {
   hasLineOfSight,
   slideAlongX,
@@ -214,7 +215,7 @@ function handleGruntChase(
     sprite.attackTimer += deltaTime;
     if (sprite.attackTimer >= attackCooldown) {
       sprite.attackTimer = 0;
-      ctx.player.health -= attackDamage;
+      applyPlayerDamage(ctx.player, attackDamage);
       ctx.triggerDamageFlash();
     }
   } else {
@@ -314,7 +315,7 @@ function handleBossMelee(
     sprite.attackTimer += deltaTime;
     if (sprite.attackTimer >= AI_BOSS_ATTACK_COOLDOWN) {
       sprite.attackTimer = 0;
-      ctx.player.health -= damage;
+      applyPlayerDamage(ctx.player, damage);
       ctx.triggerDamageFlash();
     }
   } else {
@@ -418,7 +419,7 @@ function handleShooterChase(
     sprite.attackTimer += deltaTime;
     if (sprite.attackTimer >= sprite.shooterCooldown) {
       sprite.attackTimer = 0;
-      ctx.player.health -= sprite.shooterDamage;
+      applyPlayerDamage(ctx.player, sprite.shooterDamage);
       ctx.triggerDamageFlash();
       sprite.muzzleFlashTimer = 0.2;
       broadcastGunshot(ctx);
@@ -483,7 +484,7 @@ function handleLatcherChase(
 
       // Bite if we're already touching.
       if (dist < AI_LATCHER_CONTACT_RADIUS && !sprite.attackTimer) {
-        ctx.player.health -= AI_LATCHER_DAMAGE;
+        applyPlayerDamage(ctx.player, AI_LATCHER_DAMAGE);
         ctx.triggerDamageFlash();
         sprite.attackTimer = AI_LATCHER_LEAP_COOLDOWN;
       }
@@ -523,7 +524,7 @@ function handleLatcherChase(
       const ldy = py - sprite.y;
       const ldist = Math.sqrt(ldx * ldx + ldy * ldy);
       if (ldist < AI_LATCHER_CONTACT_RADIUS) {
-        ctx.player.health -= AI_LATCHER_DAMAGE;
+        applyPlayerDamage(ctx.player, AI_LATCHER_DAMAGE);
         ctx.triggerDamageFlash();
         sprite.latcherState = LatcherState.RECOVER;
         sprite.latcherStateTimer = 0;

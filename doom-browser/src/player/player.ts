@@ -18,6 +18,7 @@ export class Player {
   public health: number = 100;
   public maxHealth: number = 100;
   public score: number = 0;
+  public armor: number = 0;
 
   constructor(startX: number, startY: number) {
     this.x = startX;

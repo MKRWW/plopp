@@ -56,6 +56,8 @@ export interface Level {
   ammo: Vec2[];
   health: Vec2[];
   secretHealth: Vec2 | null;
+  secretBerserk: Vec2 | null;
+  armorPickups: Vec2[];
   decor: DecorPlacement[];
   shotguns: Vec2[];
   rocketLaunchers: Vec2[];
@@ -832,10 +834,19 @@ export function generateLevel(seed: number, stage: number): Level {
     const secretProb = stage >= 2 ? 0.8 : 0.4;
     const numSecretAttempts = stage >= 2 ? 3 : 1;
     let secretHealth: Vec2 | null = null;
+    let secretBerserk: Vec2 | null = null;
     for (let s = 0; s < numSecretAttempts; s++) {
       if (rng() < secretProb) {
-        secretHealth = placeSecretRoom(map, rooms, rng, used);
-        if (secretHealth) break;
+        const pos = placeSecretRoom(map, rooms, rng, used);
+        if (pos) {
+          // 50% Berserk, 50% Health
+          if (rng() < 0.5) {
+            secretBerserk = pos;
+          } else {
+            secretHealth = pos;
+          }
+          break;
+        }
       }
     }
 
@@ -870,6 +881,12 @@ export function generateLevel(seed: number, stage: number): Level {
 
     const numRocketLaunchers = stage >= 4 ? 1 + Math.floor((stage - 4) / 2) : 0;
     const rocketLaunchers: Vec2[] = placeItemsInRooms(map, rooms, excludeSpawnExit, numRocketLaunchers, rng, used);
+
+    // Armor: rare pickup, 1 per stage with 40% chance, not on stage 1 or boss stage
+    let armorPickups: Vec2[] = [];
+    if (stage > 1 && stage !== BOSS_STAGE && rng() < 0.4) {
+      armorPickups = placeItemsInRooms(map, rooms, excludeSpawnExit, 1, rng, used);
+    }
 
     // Validation
     if (!validateLevel(map, spawn, rooms, spawnRoomIndices, exitRoomIndices,
@@ -922,6 +939,8 @@ export function generateLevel(seed: number, stage: number): Level {
       ammo,
       health,
       secretHealth,
+      secretBerserk,
+      armorPickups,
       decor,
       shotguns,
       rocketLaunchers,
