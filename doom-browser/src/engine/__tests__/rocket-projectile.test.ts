@@ -111,7 +111,9 @@ describe('RocketProjectile - explode', () => {
       { x: 3, y: 3, isAlive: true, health: 5, isDying: false, isDead: false, hitFlashTimer: 0 },
     ];
     const result = r.explode(enemies);
-    expect(enemies[0].health).toBe(-5);
+    expect(enemies[0].health).toBe(0);
+    expect(enemies[0].isAlive).toBe(false);
+    expect(enemies[0].isDying).toBe(true);
     expect(enemies[0].hitFlashTimer).toBe(0.15);
     expect(enemies[1].health).toBe(5);
     expect(enemies[1].hitFlashTimer).toBe(0);
@@ -120,14 +122,16 @@ describe('RocketProjectile - explode', () => {
   it('marks enemies as dying when health reaches 0 or below', () => {
     const r = createRocket(0, 0);
     const enemies = [
-      { x: 0.5, y: 0.5, isAlive: true, health: 3, isDying: false, isDead: false, hitFlashTimer: 0 },
-      { x: 1, y: 1, isAlive: true, health: 5, isDying: false, isDead: false, hitFlashTimer: 0 },
+      { x: 0.5, y: 0, isAlive: true, health: 3, isDying: false, isDead: false, hitFlashTimer: 0 },
+      { x: 3, y: 0, isAlive: true, health: 5, isDying: false, isDead: false, hitFlashTimer: 0 },
     ];
-    const result = r.explode(enemies);
+    r.explode(enemies);
     expect(enemies[0].isAlive).toBe(false);
     expect(enemies[0].isDying).toBe(true);
+    expect(enemies[0].health).toBe(0);
     expect(enemies[1].isAlive).toBe(true);
     expect(enemies[1].isDying).toBe(false);
+    expect(enemies[1].health).toBe(5);
   });
 
   it('returns killed count', () => {
@@ -156,12 +160,15 @@ describe('RocketProjectile - explode', () => {
   it('respects explosionRadius', () => {
     const r = new RocketProjectile(0, 0, 0.3, 1, 0, 10, 4, 0.5, 10);
     const enemies = [
-      { x: 0.4, y: 0.4, isAlive: true, health: 5, isDying: false, isDead: false, hitFlashTimer: 0 },
-      { x: 0.6, y: 0.6, isAlive: true, health: 5, isDying: false, isDead: false, hitFlashTimer: 0 },
+      { x: 0.3, y: 0, isAlive: true, health: 5, isDying: false, isDead: false, hitFlashTimer: 0 },
+      { x: 0.6, y: 0, isAlive: true, health: 5, isDying: false, isDead: false, hitFlashTimer: 0 },
     ];
-    const result = r.explode(enemies);
-    expect(enemies[0].health).toBe(-5);
+    r.explode(enemies);
+    expect(enemies[0].health).toBe(0);
+    expect(enemies[0].isAlive).toBe(false);
+    expect(enemies[0].isDying).toBe(true);
     expect(enemies[1].health).toBe(5);
+    expect(enemies[1].isAlive).toBe(true);
   });
 
   it('kills multiple enemies in one explode call', () => {
