@@ -313,11 +313,25 @@ export function installLevel(ctx: LevelFlowContext, state: LevelFlowState, level
   state.currentLevel = level;
   state.stage = level.stage;
 
-  ctx.player.setPosition(level.spawn.x, level.spawn.y);
-  ctx.player.dirX = level.spawn.dirX;
-  ctx.player.dirY = level.spawn.dirY;
-  ctx.player.planeX = -level.spawn.dirY * 0.66;
-  ctx.player.planeY = level.spawn.dirX * 0.66;
+  ctx.player.setPosition(level.entrance.x, level.entrance.y);
+
+  const spawnRoom = level.rooms[level.spawnRooms[0]];
+  const centerX = spawnRoom.x + spawnRoom.w / 2;
+  const centerY = spawnRoom.y + spawnRoom.h / 2;
+  const dx = centerX - level.entrance.x;
+  const dy = centerY - level.entrance.y;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len > 0.001) {
+    ctx.player.dirX = dx / len;
+    ctx.player.dirY = dy / len;
+    ctx.player.planeX = -ctx.player.dirY * 0.66;
+    ctx.player.planeY = ctx.player.dirX * 0.66;
+  } else {
+    ctx.player.dirX = 1;
+    ctx.player.dirY = 0;
+    ctx.player.planeX = 0;
+    ctx.player.planeY = 0.66;
+  }
 
   // Keycard/Door-State Reset bleibt im Renderer (Nicht-Level-Flow-Felder).
 
@@ -344,11 +358,25 @@ export function resetGameFlow(ctx: LevelFlowContext, state: LevelFlowState): voi
   worldState.loadLevel(level);
   state.currentLevel = level;
 
-  ctx.player.setPosition(level.spawn.x, level.spawn.y);
-  ctx.player.dirX = level.spawn.dirX;
-  ctx.player.dirY = level.spawn.dirY;
-  ctx.player.planeX = -level.spawn.dirY * 0.66;
-  ctx.player.planeY = level.spawn.dirX * 0.66;
+  ctx.player.setPosition(level.entrance.x, level.entrance.y);
+
+  const spawnRoom = level.rooms[level.spawnRooms[0]];
+  const centerX = spawnRoom.x + spawnRoom.w / 2;
+  const centerY = spawnRoom.y + spawnRoom.h / 2;
+  const dx = centerX - level.entrance.x;
+  const dy = centerY - level.entrance.y;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len > 0.001) {
+    ctx.player.dirX = dx / len;
+    ctx.player.dirY = dy / len;
+    ctx.player.planeX = -ctx.player.dirY * 0.66;
+    ctx.player.planeY = ctx.player.dirX * 0.66;
+  } else {
+    ctx.player.dirX = 1;
+    ctx.player.dirY = 0;
+    ctx.player.planeX = 0;
+    ctx.player.planeY = 0.66;
+  }
   ctx.player.score = 0;
 
   ctx.weapon.reset();

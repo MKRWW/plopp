@@ -1,5 +1,5 @@
 import { Player } from '../player/player';
-import { MAP_WIDTH, MAP_HEIGHT, worldState, InteractionResult } from './world';
+import { MAP_WIDTH, MAP_HEIGHT, worldState, TILE, InteractionResult } from './world';
 import { ZBuffer } from './zbuffer';
 import { InputHandler, pointerLockSupported } from '../player/input';
 import { TextureManager, Texture } from './textures';
@@ -120,8 +120,6 @@ export class Renderer {
 
   // Edge-Triggering für Interaktion (E-Taste)
   private wasInteractPressedLastFrame: boolean = false;
-  // Separates Edge-Tracking für Exit-Door-E (verhindert Mehrfach-Trigger pro Druck)
-  private wasExitEPressed: boolean = false;
 
   // Edge-Detection for TAB (reset after each poll)
   private wasTabLastFrame: boolean = false;
@@ -815,6 +813,23 @@ export class Renderer {
 
       if (mapX < 0 || mapX >= MAP_WIDTH || mapY < 0 || mapY >= MAP_HEIGHT) break;
 
+      const baseTile = worldState.getTile(mapX, mapY);
+      if (baseTile === TILE.EXIT_DOOR) {
+        const dist = Math.sqrt(
+          (mapX + 0.5 - this.player.x) ** 2 + (mapY + 0.5 - this.player.y) ** 2
+        );
+        if (dist <= 1.5) {
+          const result = worldState.interactAt(mapX, mapY, this.hasYellowKeycard, this.hasBlueKeycard);
+          if (result === InteractionResult.EXIT_READY) {
+            this.player.score += 500;
+            beginTransitionFlow(this.levelFlowCtx(), this.levelFlowState);
+          } else {
+            this.showDoorMessage(result);
+          }
+        }
+        break;
+      }
+
       // Stoppe am ersten soliden Tile
       if (worldState.isSolidTile(mapX, mapY)) {
         hit = worldState.getTile(mapX, mapY);
@@ -858,6 +873,16 @@ export class Renderer {
         this.doorMessage = 'SECRET FOUND!';
         this.doorMessageTimer = this.doorMessageDuration;
         this.player.score += 200;
+        this.soundManager.play(SoundType.DOOR);
+        break;
+      case InteractionResult.EXIT_LOCKED_NO_YELLOW:
+        this.doorMessage = 'EXIT LOCKED: YELLOW KEYCARD REQUIRED';
+        this.doorMessageTimer = this.doorMessageDuration;
+        this.soundManager.play(SoundType.DOOR);
+        break;
+      case InteractionResult.EXIT_LOCKED_NO_BLUE:
+        this.doorMessage = 'EXIT LOCKED: BLUE KEYCARD REQUIRED';
+        this.doorMessageTimer = this.doorMessageDuration;
         this.soundManager.play(SoundType.DOOR);
         break;
     }
@@ -1755,23 +1780,37 @@ export class Renderer {
       ctx.shadowBlur = 0;
     }
 
-    // --- Exit Door proximity check (Position aus Level) ---
-    const exitDoorPos = this.levelFlowState.currentLevel.exit;
-    const exitDx = exitDoorPos.x - this.player.x;
-    const exitDy = exitDoorPos.y - this.player.y;
-    const exitDist = Math.sqrt(exitDx * exitDx + exitDy * exitDy);
-    if (exitDist < 1.5) {
+    // --- Exit Door proximity check ---
+    const px = Math.floor(this.player.x);
+    const py = Math.floor(this.player.y);
+    let nearExit = false;
+    let hasKeycards = this.hasYellowKeycard && this.hasBlueKeycard;
+    for (let dy = -2; dy <= 2 && !nearExit; dy++) {
+      for (let dx = -2; dx <= 2 && !nearExit; dx++) {
+        const tx = px + dx, ty = py + dy;
+        if (tx < 0 || ty < 0 || tx >= MAP_WIDTH || ty >= MAP_HEIGHT) continue;
+        const tile = worldState.getTile(tx, ty);
+        if (tile === TILE.EXIT_DOOR) {
+          const tcx = tx + 0.5, tcy = ty + 0.5;
+          const ddx = tcx - this.player.x, ddy = tcy - this.player.y;
+          if (Math.sqrt(ddx * ddx + ddy * ddy) < 1.5) {
+            nearExit = true;
+          }
+        }
+      }
+    }
+    if (nearExit) {
       ctx.textAlign = 'center';
       ctx.font = 'bold 20px monospace';
-      if (this.hasYellowKeycard && this.hasBlueKeycard) {
+      if (hasKeycards) {
         ctx.fillStyle = '#0f0';
         ctx.shadowColor = '#0f0';
         ctx.shadowBlur = 8;
-        ctx.fillText(`EXIT — [E] zu Stage ${this.levelFlowState.stage + 1}`, w / 2, h - 90);
+        ctx.fillText(`EXIT — [E] to Stage ${this.levelFlowState.stage + 1}`, SCREEN_WIDTH / 2, SCREEN_HEIGHT - 90);
         ctx.shadowBlur = 0;
       } else {
         ctx.fillStyle = '#f44';
-        ctx.fillText('KEYCARD REQUIRED', w / 2, h - 90);
+        ctx.fillText('KEYCARD REQUIRED', SCREEN_WIDTH / 2, SCREEN_HEIGHT - 90);
       }
     }
 
@@ -2003,18 +2042,6 @@ export class Renderer {
 
         // Tür-Animationen updaten
         worldState.updateWorld(deltaTime);
-
-        // Exit-Door: Spieler mit Keycard an der Exit-Tür → nächste Stage.
-        if (this.hasYellowKeycard && this.hasBlueKeycard && this.input.isKey('KeyE') && !this.wasExitEPressed) {
-          const exitDx = this.levelFlowState.currentLevel.exit.x - this.player.x;
-          const exitDy = this.levelFlowState.currentLevel.exit.y - this.player.y;
-          const exitDistSq = exitDx * exitDx + exitDy * exitDy;
-          if (exitDistSq < 1.5 * 1.5) {
-            this.player.score += 500;
-            beginTransitionFlow(this.levelFlowCtx(), this.levelFlowState);
-          }
-        }
-        this.wasExitEPressed = this.input.isKey('KeyE');
 
         // Boss-Stage Win-Condition: all bosses dead or dying
         if (this.levelFlowState.stage === BOSS_STAGE) {

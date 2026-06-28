@@ -21,11 +21,25 @@ function main(): void {
   const level = generateLevel(baseSeed, 1);
   worldState.loadLevel(level);
 
-  const player = new Player(level.spawn.x, level.spawn.y);
-  player.dirX = level.spawn.dirX;
-  player.dirY = level.spawn.dirY;
-  player.planeX = -level.spawn.dirY * 0.66;
-  player.planeY = level.spawn.dirX * 0.66;
+  const player = new Player(level.entrance.x, level.entrance.y);
+
+  const spawnRoom = level.rooms[level.spawnRooms[0]];
+  const centerX = spawnRoom.x + spawnRoom.w / 2;
+  const centerY = spawnRoom.y + spawnRoom.h / 2;
+  const dx = centerX - level.entrance.x;
+  const dy = centerY - level.entrance.y;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len > 0.001) {
+    player.dirX = dx / len;
+    player.dirY = dy / len;
+    player.planeX = -player.dirY * 0.66;
+    player.planeY = player.dirX * 0.66;
+  } else {
+    player.dirX = 1;
+    player.dirY = 0;
+    player.planeX = 0;
+    player.planeY = 0.66;
+  }
 
   const gameStateManager = new GameStateManager();
   const weapon = new Weapon();

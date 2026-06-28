@@ -26,11 +26,15 @@ const DEBUG_TILE = DEBUG_SIZE / 16; // 30 Pixel pro Tile in Debug-Modus
 const COLORS = {
   background: 'rgba(0, 0, 0, 0.7)',
   wall: '#555',
+  exitDoor: '#0c0',
   floor: '#222',
   player: '#0f0',
   playerDir: '#0a0',
   ammo: '#ff0',
   health: '#0f0',
+  keycardBlue: '#48f',
+  keycardYellow: '#fc0',
+  entrance: '#5af',
   border: '#888'
 };
 
@@ -83,6 +87,8 @@ export class Minimap {
 
     this.renderMap(ctx, TILE_SIZE, reachable, offsetX, offsetY);
 
+    this.renderEntrance(ctx, TILE_SIZE, offsetX, offsetY);
+
     // Gegner NICHT auf der normalen Minimap anzeigen — das wäre ein Gameplay-Spoiler.
     // Sie sind nur im Debug-Modus (F1) sichtbar.
     for (const sprite of sprites) {
@@ -92,8 +98,14 @@ export class Minimap {
       const color =
         sprite.type === SpriteType.AMMO ? COLORS.ammo :
         sprite.type === SpriteType.HEALTH ? COLORS.health :
+        sprite.type === SpriteType.KEYCARD ? COLORS.keycardBlue :
+        sprite.type === SpriteType.YELLOW_KEYCARD ? COLORS.keycardYellow :
         '#5af';
-      this.renderSpriteDot(ctx, sprite.x, sprite.y, TILE_SIZE, offsetX, offsetY, color);
+      if (sprite.type === SpriteType.KEYCARD || sprite.type === SpriteType.YELLOW_KEYCARD) {
+        this.renderKeycardMarker(ctx, sprite.x, sprite.y, TILE_SIZE, offsetX, offsetY, color);
+      } else {
+        this.renderSpriteDot(ctx, sprite.x, sprite.y, TILE_SIZE, offsetX, offsetY, color);
+      }
     }
 
     this.renderPlayer(ctx, player, TILE_SIZE, centerX, centerY);
@@ -116,6 +128,8 @@ export class Minimap {
     ctx.fillRect(0, 0, DEBUG_SIZE, DEBUG_SIZE);
 
     this.renderMap(ctx, tile, undefined, offsetX, offsetY);
+
+    this.renderEntrance(ctx, tile, offsetX, offsetY);
 
     // Tile-Gitter
     ctx.strokeStyle = 'rgba(255,255,255,0.08)';
@@ -144,8 +158,14 @@ export class Minimap {
       const color =
         sprite.type === SpriteType.AMMO ? COLORS.ammo :
         sprite.type === SpriteType.HEALTH ? COLORS.health :
+        sprite.type === SpriteType.KEYCARD ? COLORS.keycardBlue :
+        sprite.type === SpriteType.YELLOW_KEYCARD ? COLORS.keycardYellow :
         '#5af';
-      this.renderSpriteDot(ctx, sprite.x, sprite.y, tile, offsetX, offsetY, color);
+      if (sprite.type === SpriteType.KEYCARD || sprite.type === SpriteType.YELLOW_KEYCARD) {
+        this.renderKeycardMarker(ctx, sprite.x, sprite.y, tile, offsetX, offsetY, color);
+      } else {
+        this.renderSpriteDot(ctx, sprite.x, sprite.y, tile, offsetX, offsetY, color);
+      }
     }
 
     // Gegner mit Kollisionskreis und state-based colors
@@ -282,7 +302,11 @@ export class Minimap {
             // Geschlossene Tür = blau (Blue Key Door) oder grün (Secret Wall)
             ctx.fillStyle = base === TILE.BLUE_KEY_DOOR ? '#44f' : '#4a4';
           }
+        } else if (base === TILE.EXIT_DOOR) {
+          ctx.fillStyle = COLORS.exitDoor;
         } else if (base > 0) {
+          ctx.fillStyle = COLORS.wall;
+        } else if (reachable && !reachable[y][x]) {
           ctx.fillStyle = COLORS.wall;
         } else if (reachable && !reachable[y][x]) {
           // Versteckte, nicht erreichbare Bodenbereiche (z.B. Secret Room)
@@ -357,6 +381,47 @@ export class Minimap {
     ctx.beginPath();
     ctx.arc(px, py, Math.max(2, tileSize * 0.15), 0, Math.PI * 2);
     ctx.fill();
+  }
+
+  private renderEntrance(
+    ctx: CanvasRenderingContext2D,
+    tileSize: number,
+    offsetX: number,
+    offsetY: number
+  ): void {
+    const level = worldState.getCurrentLevel();
+    if (!level) return;
+    const ex = level.entrance.x * tileSize + offsetX;
+    const ey = level.entrance.y * tileSize + offsetY;
+    ctx.fillStyle = COLORS.entrance;
+    ctx.beginPath();
+    ctx.arc(ex, ey, Math.max(3, tileSize * 0.2), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  private renderKeycardMarker(
+    ctx: CanvasRenderingContext2D,
+    worldX: number,
+    worldY: number,
+    tileSize: number,
+    offsetX: number,
+    offsetY: number,
+    color: string
+  ): void {
+    const px = worldX * tileSize + offsetX;
+    const py = worldY * tileSize + offsetY;
+    const radius = Math.max(3.5, tileSize * 0.22);
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(px, py, radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(px, py, radius + 1, 0, Math.PI * 2);
+    ctx.stroke();
   }
 
   private renderPlayer(

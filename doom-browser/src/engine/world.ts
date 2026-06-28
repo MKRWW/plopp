@@ -62,6 +62,9 @@ export enum InteractionResult {
   DOOR_LOCKED = 2,
   SECRET_FOUND = 3,
   YELLOW_DOOR_LOCKED = 4,
+  EXIT_READY = 5,
+  EXIT_LOCKED_NO_YELLOW = 6,
+  EXIT_LOCKED_NO_BLUE = 7,
 }
 
 /**
@@ -138,6 +141,11 @@ export class WorldState {
    */
   interactAt(x: number, y: number, hasYellowKeycard: boolean, hasBlueKeycard: boolean): InteractionResult {
     const base = WORLD_MAP[y]?.[x];
+    if (base === TILE.EXIT_DOOR) {
+      if (!hasYellowKeycard) return InteractionResult.EXIT_LOCKED_NO_YELLOW;
+      if (!hasBlueKeycard) return InteractionResult.EXIT_LOCKED_NO_BLUE;
+      return InteractionResult.EXIT_READY;
+    }
     if (base !== TILE.BLUE_KEY_DOOR && base !== TILE.SECRET_WALL && base !== TILE.YELLOW_KEY_DOOR) return InteractionResult.NONE;
 
     const door = this.doors.get(`${x},${y}`);
