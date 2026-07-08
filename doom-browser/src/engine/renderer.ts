@@ -29,6 +29,8 @@ import { GameState, GameStateManager } from '../game/state';
 import { Weapon } from '../game/weapon';
 import { WeaponInventory, WeaponType, WEAPONS } from '../game/weapons';
 import { drawWeapon, type WeaponRendererContext } from './weapon-renderer';
+import { drawHUD, type HUDContext } from './hud-renderer';
+import { castRays, drawFloorAndCeiling, type RaycasterContext } from './raycaster';
 import { RocketProjectile } from './rocket-projectile';
 import { BioProjectile } from './bio-projectile';
 import { BloodParticle } from './blood-particle';
@@ -278,6 +280,36 @@ export class Renderer {
       weapon: this.weapon,
       inventory: this.inventory,
       muzzleFlashTexture: this.muzzleFlashTexture,
+    };
+  }
+
+  private hudRendererCtx(): HUDContext {
+    return {
+      ctx: this.ctx,
+      player: this.player,
+      inventory: this.inventory,
+      sprites: this.sprites,
+      effectsState: this.effectsState,
+      hasYellowKeycard: this.hasYellowKeycard,
+      hasBlueKeycard: this.hasBlueKeycard,
+      keycardPickupMessage: this.keycardPickupMessage,
+      doorMessage: this.doorMessage,
+      doorMessageTimer: this.doorMessageTimer,
+      weaponFlashTimer: this.weaponFlashTimer,
+      weaponFlashName: this.weaponFlashName,
+      weaponFlashDuration: this.WEAPON_FLASH_DURATION,
+      levelFlowState: this.levelFlowState,
+      berserkTimer: this.berserkTimer,
+      berserkDuration: this.BERSERK_DURATION,
+    };
+  }
+
+  private raycasterCtx(): RaycasterContext {
+    return {
+      ctx: this.ctx,
+      player: this.player,
+      textureManager: this.textureManager,
+      zBuffer: this.zBuffer,
     };
   }
 
@@ -966,569 +998,12 @@ export class Renderer {
   }
 
   /**
-   * Raycasting-Kernel: Castet eine Ray pro Bildschirmspalte.
-   * Verwendet den DDA-Algorithmus für effizientes Grid-Tracing.
-   * Berücksichtigt Türanimationen visuell.
-   */
-  private castRays(): void {
-    this.zBuffer.clear();
-
-    for (let x = 0; x < SCREEN_WIDTH; x++) {
-      // Kamera-X-Position (-1 links, 0 mitte, 1 rechts)
-      const cameraX = 2 * (x / SCREEN_WIDTH) - 1;
-
-      // Richtung der Ray
-      const rayDirX = this.player.dirX + this.player.planeX * cameraX;
-      const rayDirY = this.player.dirY + this.player.planeY * cameraX;
-
-      // Aktuelles Grid-Zelle
-      let mapX = Math.floor(this.player.x);
-      let mapY = Math.floor(this.player.y);
-
-      // Länge der Ray von einem Side-Schritt zum nächsten
-      const deltaDistX = Math.abs(1 / rayDirX);
-      const deltaDistY = Math.abs(1 / rayDirY);
-
-      let sideDistX: number;
-      let sideDistY: number;
-      let stepX: number;
-      let stepY: number;
-      let side = 0; // 0 = NS, 1 = EW
-
-      // Berechnung der Schritte und initialen sideDist
-      if (rayDirX < 0) {
-        stepX = -1;
-        sideDistX = (this.player.x - mapX) * deltaDistX;
-      } else {
-        stepX = 1;
-        sideDistX = (mapX + 1.0 - this.player.x) * deltaDistX;
-      }
-      if (rayDirY < 0) {
-        stepY = -1;
-        sideDistY = (this.player.y - mapY) * deltaDistY;
-      } else {
-        stepY = 1;
-        sideDistY = (mapY + 1.0 - this.player.y) * deltaDistY;
-      }
-
-      // DDA-Suche bis Wand gefunden
-      let hit = 0;
-      let doorProgress = 0; // Türfortschritt für Animation
-      while (hit === 0) {
-        if (sideDistX < sideDistY) {
-          sideDistX += deltaDistX;
-          mapX += stepX;
-          side = 0;
-        } else {
-          sideDistY += deltaDistY;
-          mapY += stepY;
-          side = 1;
-        }
-
-        // Grenzwert-Check (nutzt dynamischen WorldState für Türen)
-        if (mapX < 0 || mapX >= MAP_WIDTH || mapY < 0 || mapY >= MAP_HEIGHT) {
-          hit = 1; // Außerhalb der Karte = Wand
-        } else if (worldState.isSolidTile(mapX, mapY)) {
-          hit = worldState.getTile(mapX, mapY);
-          // Türfortschritt speichern für visuelle Animation
-          const door = worldState.getDoor(mapX, mapY);
-          if (door && door.state === 'opening') {
-            doorProgress = door.progress;
-          }
-        }
-      }
-
-      // Perpendiculare Distanz berechnen (vermeidet Fisheye)
-      let perpWallDist: number;
-      if (side === 0) {
-        perpWallDist = (sideDistX - deltaDistX);
-      } else {
-        perpWallDist = (sideDistY - deltaDistY);
-      }
-
-      // Z-Buffer speichern
-      this.zBuffer.set(x, perpWallDist);
-
-      // Wandhöhe berechnen
-      const lineHeight = Math.floor(SCREEN_HEIGHT / perpWallDist);
-
-      // Start/Ende der Wand-Zeichnung
-      let drawStart = Math.floor(-lineHeight / 2 + SCREEN_HEIGHT / 2);
-      if (drawStart < 0) drawStart = 0;
-      let drawEnd = Math.floor(lineHeight / 2 + SCREEN_HEIGHT / 2);
-      if (drawEnd >= SCREEN_HEIGHT) drawEnd = SCREEN_HEIGHT - 1;
-
-      // --- Textur-Coordinate berechnen ---
-      // Wo hat die Ray die Wand getroffen? (0.0 - 1.0 innerhalb des Tiles)
-      let wallX: number;
-      if (side === 0) {
-        wallX = this.player.y + perpWallDist * rayDirY;
-      } else {
-        wallX = this.player.x + perpWallDist * rayDirX;
-      }
-      wallX -= Math.floor(wallX); // Auf 0.0-1.0 normieren
-
-      // U-Coordinate (0 = links der Textur, 1 = rechts).
-      // Flip-Konvention so gewählt, dass die natürliche Textur-Orientierung
-      // (Texte/Asymmetrien wie das "EXIT"-Schild) korrekt herum dargestellt wird.
-      let u = wallX;
-      if ((side === 0 && rayDirX < 0) || (side === 1 && rayDirY > 0)) {
-        u = 1.0 - u;
-      }
-
-      // Textur holen
-      const texture = this.textureManager.getTexture(hit);
-
-      // Helligkeit berechnen (Distanz-Nebel + Seitenschattierung + Türanimation)
-      const sideShade = side === 1 ? 0.7 : 1.0;
-      let brightness = Math.min(1.0, 2.0 / (1.0 + perpWallDist * 0.3)) * sideShade;
-
-      // Türanimation: während "opening" wird Tür von unten nach oben geöffnet
-      // - Obere Hälfte bleibt sichtbar (Tür "sackt" nach unten)
-      // - Helligkeit nimmt mit progress zu (Tür wird heller/transparenter)
-      if (doorProgress > 0 && doorProgress < 1) {
-        const doorShade = 1.0 - doorProgress * 0.6; // bis zu 60% heller
-        brightness *= doorShade;
-      }
-
-      // Textur-Spalte zeichnen
-      if (texture) {
-        this.drawTexturedColumn(x, drawStart, drawEnd, lineHeight, texture, u, brightness, doorProgress);
-      } else {
-        // Fallback: Einfarbige Wand (sollte nicht passieren)
-        const baseColor = hit === 1 ? [180, 50, 50] : (hit === 2 ? [50, 180, 50] : [200, 50, 50]);
-        let r = Math.floor(baseColor[0] * brightness);
-        let g = Math.floor(baseColor[1] * brightness);
-        let b = Math.floor(baseColor[2] * brightness);
-        // Tür-Animation im Fallback
-        if (doorProgress > 0 && doorProgress < 1) {
-          const doorShade = 1.0 - doorProgress * 0.6;
-          r = Math.floor(r * doorShade);
-          g = Math.floor(g * doorShade);
-          b = Math.floor(b * doorShade);
-        }
-        this.ctx.fillStyle = `rgb(${r},${g},${b})`;
-        this.ctx.fillRect(x, drawStart, 1, drawEnd - drawStart);
-      }
-    }
-  }
-
-  /**
    * Zeichnet eine einzelne Textur-Spalte auf den Canvas.
    * 
    * @param screenX Bildschirmspalte
    * @param drawStart Oberer Rand der Wand
    * @param drawEnd Unterer Rand der Wand
    * @param wallLineHeight Urspruengliche projizierte Wandhoehe vor Screen-Clipping
-   * @param texture Die Textur
-   * @param u Texture-Koordinate (0.0 - 1.0)
-   * @param brightness Helligkeitsfaktor
-   * @param doorProgress Türöffnungs-Fortschritt 0..1 (für sichtbare Animation)
-   */
-  private drawTexturedColumn(
-    screenX: number,
-    drawStart: number,
-    drawEnd: number,
-    wallLineHeight: number,
-    texture: Texture,
-    u: number,
-    brightness: number,
-    doorProgress: number = 0
-  ): void {
-    const texWidth = texture.width;
-    const texHeight = texture.height;
-    const texData = texture.data.data;
-
-    // Textur-X-Position (Pixel-Index)
-    const texX = Math.floor(u * texWidth) & (texWidth - 1); // Bitmask für Power-of-2
-
-    const visibleHeight = drawEnd - drawStart;
-    if (visibleHeight <= 0) return;
-
-    // ImageData für diese Spalte erstellen
-    const columnData = new ImageData(1, visibleHeight);
-    const colPixels = columnData.data;
-    const texStep = texHeight / wallLineHeight;
-    let texPos = (drawStart - SCREEN_HEIGHT / 2 + wallLineHeight / 2) * texStep;
-
-    // Türanimation: Berechne den sichtbaren Bereich
-    // Bei progress > 0 wird die Tür von unten nach oben "geöffnet"
-    // - Obere Bereiche bleiben sichtbar
-    // - Untere Bereiche werden freigegeben (Boden sichtbar)
-    let doorClipY = 0; // Ab welchem y-Wert (relativ zu drawStart) die Tür noch sichtbar ist
-    if (doorProgress > 0 && doorProgress < 1) {
-      // Tür wird von unten nach oben geöffnet
-      // Bei progress=0.5 ist die untere Hälfte weg, bei progress=1 alles weg
-      doorClipY = Math.floor(visibleHeight * (1.0 - doorProgress));
-    }
-
-    for (let y = 0; y < visibleHeight; y++) {
-      // Vertikale Textur-Koordinate
-      const texY = Math.floor(texPos) & (texHeight - 1);
-      texPos += texStep;
-
-      // Destination-Index in der Spalte
-      const dstIdx = y * 4;
-
-      // Tür-Clip: Wenn y >= doorClipY, dann ist dieser Bereich bereits "geöffnet"
-      if (doorProgress > 0 && doorProgress < 1 && y >= doorClipY) {
-        // Scanline-Illusion: abwechselnd verdunkelte/hellere Streifen
-        // simulieren das Sichtbarwerden des Bodens ohne Transparenz
-        const isScanline = (y % 4) < 2;
-        const scanlineDarken = isScanline ? 0.35 : 0.65;
-        // Source-Pixel aus Textur lesen
-        const srcIdx = (texY * texWidth + texX) * 4;
-        colPixels[dstIdx]     = texData[srcIdx] * brightness * scanlineDarken;
-        colPixels[dstIdx + 1] = texData[srcIdx + 1] * brightness * scanlineDarken;
-        colPixels[dstIdx + 2] = texData[srcIdx + 2] * brightness * scanlineDarken;
-        colPixels[dstIdx + 3] = 255; // Immer undurchsichtig
-        continue;
-      }
-
-      // Source-Pixel aus Textur lesen
-      const srcIdx = (texY * texWidth + texX) * 4;
-
-      // Farbe mit Helligkeit multiplizieren
-      colPixels[dstIdx] = texData[srcIdx] * brightness;
-      colPixels[dstIdx + 1] = texData[srcIdx + 1] * brightness;
-      colPixels[dstIdx + 2] = texData[srcIdx + 2] * brightness;
-      colPixels[dstIdx + 3] = 255; // Vollständig undurchsichtig
-    }
-
-    // Spalte auf Canvas zeichnen
-    this.ctx.putImageData(columnData, screenX, drawStart);
-  }
-
-  /**
-   * Decke und Boden rendern.
-   */
-  private drawFloorAndCeiling(): void {
-    const floorTexture = this.textureManager.getFloorTexture();
-    const ceilingTexture = this.textureManager.getCeilingTexture();
-
-    if (!floorTexture || !ceilingTexture) {
-      // Fallback falls der TextureManager noch nicht bereit ist.
-      this.ctx.fillStyle = '#333';
-      this.ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT / 2);
-      this.ctx.fillStyle = '#555';
-      this.ctx.fillRect(0, SCREEN_HEIGHT / 2, SCREEN_WIDTH, SCREEN_HEIGHT / 2);
-      return;
-    }
-
-    const frame = this.ctx.createImageData(SCREEN_WIDTH, SCREEN_HEIGHT);
-    const pixels = frame.data;
-
-    // Basisfarben decken auch die Horizontlinie ab, bei der Floor-Casting unendlich weit waere.
-    for (let y = 0; y < SCREEN_HEIGHT; y++) {
-      const isCeiling = y < SCREEN_HEIGHT / 2;
-      const r = isCeiling ? 42 : 58;
-      const g = isCeiling ? 28 : 58;
-      const b = isCeiling ? 18 : 58;
-      for (let x = 0; x < SCREEN_WIDTH; x++) {
-        const idx = (y * SCREEN_WIDTH + x) * 4;
-        pixels[idx] = r;
-        pixels[idx + 1] = g;
-        pixels[idx + 2] = b;
-        pixels[idx + 3] = 255;
-      }
-    }
-
-    const dirX = this.player.dirX;
-    const dirY = this.player.dirY;
-    const planeX = this.player.planeX;
-    const planeY = this.player.planeY;
-
-    const rayDirX0 = dirX - planeX;
-    const rayDirY0 = dirY - planeY;
-    const rayDirX1 = dirX + planeX;
-    const rayDirY1 = dirY + planeY;
-
-    const floorData = floorTexture.data.data;
-    const ceilingData = ceilingTexture.data.data;
-    const floorMaskX = floorTexture.width - 1;
-    const floorMaskY = floorTexture.height - 1;
-    const ceilingMaskX = ceilingTexture.width - 1;
-    const ceilingMaskY = ceilingTexture.height - 1;
-    const halfHeight = SCREEN_HEIGHT / 2;
-    const posZ = 0.5 * SCREEN_HEIGHT;
-
-    for (let y = Math.floor(halfHeight) + 1; y < SCREEN_HEIGHT; y++) {
-      const p = y - halfHeight;
-      const rowDistance = posZ / p;
-      const floorStepX = rowDistance * (rayDirX1 - rayDirX0) / SCREEN_WIDTH;
-      const floorStepY = rowDistance * (rayDirY1 - rayDirY0) / SCREEN_WIDTH;
-
-      let floorX = this.player.x + rowDistance * rayDirX0;
-      let floorY = this.player.y + rowDistance * rayDirY0;
-
-      const floorBrightness = Math.min(1.0, 2.2 / (1.0 + rowDistance * 0.14));
-      const ceilingBrightness = Math.min(0.78, 1.8 / (1.0 + rowDistance * 0.18));
-      const ceilingY = SCREEN_HEIGHT - y - 1;
-
-      for (let x = 0; x < SCREEN_WIDTH; x++) {
-        const cellX = Math.floor(floorX);
-        const cellY = Math.floor(floorY);
-
-        const floorTexX = Math.floor(floorTexture.width * (floorX - cellX)) & floorMaskX;
-        const floorTexY = Math.floor(floorTexture.height * (floorY - cellY)) & floorMaskY;
-        const floorSrc = (floorTexY * floorTexture.width + floorTexX) * 4;
-        const floorDst = (y * SCREEN_WIDTH + x) * 4;
-
-        pixels[floorDst] = floorData[floorSrc] * floorBrightness;
-        pixels[floorDst + 1] = floorData[floorSrc + 1] * floorBrightness;
-        pixels[floorDst + 2] = floorData[floorSrc + 2] * floorBrightness;
-        pixels[floorDst + 3] = 255;
-
-        const ceilingTexX = Math.floor(ceilingTexture.width * (floorX - cellX)) & ceilingMaskX;
-        const ceilingTexY = Math.floor(ceilingTexture.height * (floorY - cellY)) & ceilingMaskY;
-        const ceilingSrc = (ceilingTexY * ceilingTexture.width + ceilingTexX) * 4;
-        const ceilingDst = (ceilingY * SCREEN_WIDTH + x) * 4;
-
-        pixels[ceilingDst] = ceilingData[ceilingSrc] * ceilingBrightness;
-        pixels[ceilingDst + 1] = ceilingData[ceilingSrc + 1] * ceilingBrightness;
-        pixels[ceilingDst + 2] = ceilingData[ceilingSrc + 2] * ceilingBrightness;
-        pixels[ceilingDst + 3] = 255;
-
-        floorX += floorStepX;
-        floorY += floorStepY;
-      }
-    }
-
-    this.ctx.putImageData(frame, 0, 0);
-  }
-
-  /**
-   * Zeichnet das HUD: Health-Bar, Ammo, Score, Sprint-Indikator.
-   */
-  private drawHUD(): void {
-    const ctx = this.ctx;
-    const w = SCREEN_WIDTH;
-    const h = SCREEN_HEIGHT;
-
-    // --- Health Bar (unten links) ---
-    const healthBarX = 20;
-    const healthBarY = h - 50;
-    const healthBarW = 200;
-    const healthBarH = 20;
-
-    // Hintergrund
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillRect(healthBarX - 2, healthBarY - 2, healthBarW + 4, healthBarH + 4);
-
-    // Leere Bar
-    ctx.fillStyle = '#400';
-    ctx.fillRect(healthBarX, healthBarY, healthBarW, healthBarH);
-
-    // Füllstand
-    const healthPct = this.player.health / this.player.maxHealth;
-    const healthColor = healthPct > 0.5 ? '#0c0' : (healthPct > 0.25 ? '#cc0' : '#c00');
-    ctx.fillStyle = healthColor;
-    ctx.fillRect(healthBarX, healthBarY, healthBarW * healthPct, healthBarH);
-
-    // Health-Text
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 14px monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText(`HP ${this.player.health}`, healthBarX + 5, healthBarY + 15);
-
-    // --- Armor Bar (below health bar) ---
-    if (this.player.armor > 0) {
-      const armorBarX = 20;
-      const armorBarY = h - 28;
-      const armorBarW = 200;
-      const armorBarH = 12;
-      ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillRect(armorBarX - 2, armorBarY - 2, armorBarW + 4, armorBarH + 4);
-      ctx.fillStyle = '#033';
-      ctx.fillRect(armorBarX, armorBarY, armorBarW, armorBarH);
-      const armorPct = this.player.armor / 100;
-      ctx.fillStyle = '#0cc';
-      ctx.fillRect(armorBarX, armorBarY, armorBarW * armorPct, armorBarH);
-      ctx.fillStyle = '#fff';
-      ctx.font = 'bold 10px monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText(`ARMOR ${this.player.armor}`, armorBarX + 5, armorBarY + 10);
-    }
-
-    // --- Weapon Name + Ammo (unten rechts) ---
-    const def = this.inventory.getCurrent();
-    const ammo = this.inventory.getCurrentAmmo();
-    const ammoStr = isFinite(ammo) ? String(ammo) : '∞';
-    ctx.textAlign = 'right';
-    ctx.font = 'bold 18px monospace';
-    ctx.fillStyle = '#ff0';
-    ctx.fillText(`${def.name} — ${ammoStr}`, w - 20, h - 30);
-
-    // --- Score (oben rechts) ---
-    ctx.textAlign = 'right';
-    ctx.font = 'bold 16px monospace';
-    ctx.fillStyle = '#fff';
-    ctx.fillText(`SCORE: ${this.player.score}`, w - 20, 25);
-
-    // --- Kills (oben rechts, unter Score) ---
-    ctx.font = '14px monospace';
-    ctx.fillStyle = '#f88';
-    ctx.fillText(`KILLS: ${this.inventory.kills}`, w - 20, 45);
-
-    // --- Sprint-Indikator ---
-    if (this.effectsState.isSprinting) {
-      ctx.textAlign = 'center';
-      ctx.font = 'bold 16px monospace';
-      ctx.fillStyle = '#ff0';
-      ctx.fillText('⚡ SPRINT', w / 2, h - 60);
-    }
-
-    // --- Item-Pickup-Hinweis (nur für collectable Items) ---
-    const pickupRadius = 0.5;
-    for (const sprite of this.sprites) {
-      if (!sprite.isCollectable) continue;
-      const dx = sprite.x - this.player.x;
-      const dy = sprite.y - this.player.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < pickupRadius) {
-        ctx.textAlign = 'center';
-        ctx.font = 'bold 18px monospace';
-        if (sprite.type === SpriteType.KEYCARD) {
-          ctx.fillStyle = '#5af';
-          ctx.fillText('[E] KEYCARD einsammeln', w / 2, 60);
-        } else if (sprite.type === SpriteType.ARMOR) {
-          ctx.fillStyle = '#0cc';
-          ctx.fillText('[E] ARMOR einsammeln', w / 2, 60);
-        } else if (sprite.type === SpriteType.BERSERK) {
-          ctx.fillStyle = '#f44';
-          ctx.fillText('[E] BERSERK einsammeln', w / 2, 60);
-        } else {
-          ctx.fillStyle = sprite.type === SpriteType.AMMO ? '#ff0' : '#0f0';
-          const itemName = sprite.type === SpriteType.AMMO ? 'AMMO' : 'HEALTH';
-          ctx.fillText(`[E] ${itemName} einsammeln`, w / 2, 60);
-        }
-        break;
-      }
-    }
-
-    // --- Keycard Pickup Message (kurz anzeigen) ---
-    if (this.keycardPickupMessage > 0) {
-      const alpha = Math.min(1, this.keycardPickupMessage / 0.5);
-      ctx.textAlign = 'center';
-      ctx.font = 'bold 24px monospace';
-      ctx.fillStyle = `rgba(90, 184, 255, ${alpha})`;
-      ctx.shadowColor = '#5af';
-      ctx.shadowBlur = 10;
-      ctx.fillText('KEYCARD GEFUNDEN!', w / 2, h / 2 - 40);
-      ctx.shadowBlur = 0;
-    }
-
-    // --- Keycard Indicator (oben links) ---
-    if (this.hasYellowKeycard) {
-      ctx.textAlign = 'left';
-      ctx.font = 'bold 14px monospace';
-      ctx.fillStyle = '#5af';
-      ctx.fillText('CARD', 20, 25);
-    }
-
-    // --- Door Message (Mitte oben) ---
-    if (this.doorMessageTimer > 0) {
-      const alpha = Math.min(1, this.doorMessageTimer / 0.5);
-      ctx.textAlign = 'center';
-      ctx.font = 'bold 20px monospace';
-      let msgColor = '#ff0';
-      if (this.doorMessage.includes('LOCKED')) msgColor = '#f44';
-      else if (this.doorMessage.includes('SECRET')) msgColor = '#0f0';
-      else if (this.doorMessage.includes('OPENING')) msgColor = '#5af';
-      ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
-      ctx.shadowColor = msgColor;
-      ctx.shadowBlur = 8;
-      ctx.fillText(this.doorMessage, w / 2, 80);
-      ctx.shadowBlur = 0;
-    }
-
-    // --- Exit Door proximity check ---
-    const px = Math.floor(this.player.x);
-    const py = Math.floor(this.player.y);
-    let nearExit = false;
-    let hasKeycards = this.hasYellowKeycard && this.hasBlueKeycard;
-    for (let dy = -2; dy <= 2 && !nearExit; dy++) {
-      for (let dx = -2; dx <= 2 && !nearExit; dx++) {
-        const tx = px + dx, ty = py + dy;
-        if (tx < 0 || ty < 0 || tx >= MAP_WIDTH || ty >= MAP_HEIGHT) continue;
-        const tile = worldState.getTile(tx, ty);
-        if (tile === TILE.EXIT_DOOR) {
-          const tcx = tx + 0.5, tcy = ty + 0.5;
-          const ddx = tcx - this.player.x, ddy = tcy - this.player.y;
-          if (Math.sqrt(ddx * ddx + ddy * ddy) < 1.5) {
-            nearExit = true;
-          }
-        }
-      }
-    }
-    if (nearExit) {
-      ctx.textAlign = 'center';
-      ctx.font = 'bold 20px monospace';
-      if (hasKeycards) {
-        ctx.fillStyle = '#0f0';
-        ctx.shadowColor = '#0f0';
-        ctx.shadowBlur = 8;
-        ctx.fillText(`EXIT — [E] to Stage ${this.levelFlowState.stage + 1}`, SCREEN_WIDTH / 2, SCREEN_HEIGHT - 90);
-        ctx.shadowBlur = 0;
-      } else {
-        ctx.fillStyle = '#f44';
-        ctx.fillText('KEYCARD REQUIRED', SCREEN_WIDTH / 2, SCREEN_HEIGHT - 90);
-      }
-    }
-
-    // --- Weapon Switch Flash (centered) ---
-    if (this.weaponFlashTimer > 0) {
-      const alpha = this.weaponFlashTimer / this.WEAPON_FLASH_DURATION;
-      ctx.save();
-      ctx.textAlign = 'center';
-      ctx.font = 'bold 32px monospace';
-      ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
-      ctx.shadowColor = '#fff';
-      ctx.shadowBlur = 10;
-      ctx.fillText(this.weaponFlashName, w / 2, h / 2);
-      ctx.restore();
-    }
-
-    // --- Stage-Anzeige (oben Mitte, klein) ---
-    ctx.textAlign = 'center';
-    ctx.font = 'bold 14px monospace';
-    ctx.fillStyle = '#aaa';
-    ctx.fillText(`STAGE ${this.levelFlowState.stage}`, w / 2, 22);
-
-    // --- Stage-Übergangs-Banner ---
-    if (this.levelFlowState.stageBannerTimer > 0) {
-      const alpha = Math.min(1, this.levelFlowState.stageBannerTimer / 0.7);
-      ctx.textAlign = 'center';
-      ctx.font = 'bold 36px monospace';
-      ctx.fillStyle = `rgba(255, 220, 80, ${alpha})`;
-      ctx.shadowColor = '#fc0';
-      ctx.shadowBlur = 14;
-      ctx.fillText(`STAGE ${this.levelFlowState.stage}`, w / 2, h / 2 - 60);
-      ctx.shadowBlur = 0;
-    }
-
-    // --- Berserk active overlay ---
-    if (this.berserkTimer > 0) {
-      // Red border glow
-      const alpha = Math.min(0.4, this.berserkTimer / this.BERSERK_DURATION * 0.4);
-      ctx.strokeStyle = `rgba(255, 0, 0, ${alpha})`;
-      ctx.lineWidth = 6;
-      ctx.strokeRect(3, 3, w - 6, h - 6);
-      ctx.lineWidth = 1;
-
-      // Countdown text (top center)
-      ctx.textAlign = 'center';
-      ctx.font = 'bold 22px monospace';
-      ctx.fillStyle = `rgba(255, 60, 60, ${0.7 + 0.3 * Math.sin(performance.now() / 150)})`;
-      ctx.shadowColor = '#f00';
-      ctx.shadowBlur = 12;
-      ctx.fillText(`BERSERK ${this.berserkTimer.toFixed(1)}`, w / 2, 25);
-      ctx.shadowBlur = 0;
-    }
-
-    ctx.textAlign = 'left';
-  }
-
   public start(): void {
     this.lastTime = performance.now();
     this.accumulator = 0;
@@ -1601,8 +1076,8 @@ export class Renderer {
       if (gameState === GameState.LOADING) {
         this.gameStateManager.render(this.ctx, SCREEN_WIDTH, SCREEN_HEIGHT, this.player.health, this.levelFlowState.loadingProgress, this.levelFlowState.loadingTargetStage);
       } else {
-        this.drawFloorAndCeiling();
-        this.castRays();
+        drawFloorAndCeiling(this.raycasterCtx());
+        castRays(this.raycasterCtx());
         this.renderSprites();
         const effectsCtx = this.effectsCtx();
         renderBloodParticles(effectsCtx);
@@ -1611,7 +1086,7 @@ export class Renderer {
 
         if (gameState === GameState.PLAYING || gameState === GameState.PAUSED) {
           drawWeapon(this.weaponRendererCtx());
-          this.drawHUD();
+          drawHUD(this.hudRendererCtx());
           drawLowHealthVignette(effectsCtx, this.effectsState);
           drawDamageFlash(effectsCtx, this.effectsState);
           drawHitMarker(effectsCtx, this.effectsState);
