@@ -84,7 +84,19 @@ export class SoundManager {
   public init(): void {
     if (this.audioContext) return; // Bereits initialisiert
 
-    this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    try {
+      // C4-fix: Typ-safe AudioContext creation without 'as any'
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) {
+        console.warn('Web Audio API not supported');
+        return;
+      }
+      this.audioContext = new AudioCtx();
+    } catch (e) {
+      console.warn('Failed to create AudioContext:', e);
+      return;
+    }
+
     this.masterGain = this.audioContext.createGain();
     this.masterGain.gain.value = 0.3; // Master-Lautstärke
     this.masterGain.connect(this.audioContext.destination);

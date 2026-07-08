@@ -27,6 +27,16 @@ export class InputHandler {
   private wheelDownFlag = 0;
   private wheelUpFlag = 0;
 
+  // Bound listener references for cleanup in dispose()
+  private boundKeyDown: ((e: KeyboardEvent) => void) | null = null;
+  private boundKeyUp: ((e: KeyboardEvent) => void) | null = null;
+  private boundMouseMove: ((e: MouseEvent) => void) | null = null;
+  private boundPointerLockChange: (() => void) | null = null;
+  private boundWheel: ((e: WheelEvent) => void) | null = null;
+
+  // Disposed flag to prevent double-cleanup
+  private disposed = false;
+
   constructor(canvas: HTMLCanvasElement, sensitivity: number = 0.002) {
     this.canvas = canvas;
     this.mouseSensitivity = sensitivity;
@@ -38,32 +48,62 @@ export class InputHandler {
   }
 
   /**
+   * Removes all event listeners. Call this when the renderer or game resets
+   * to prevent listener accumulation and memory leaks (C2-fix).
+   */
+  public dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+
+    if (this.boundKeyDown) {
+      window.removeEventListener('keydown', this.boundKeyDown, true);
+    }
+    if (this.boundKeyUp) {
+      window.removeEventListener('keyup', this.boundKeyUp, true);
+    }
+    if (this.boundMouseMove) {
+      document.removeEventListener('mousemove', this.boundMouseMove);
+    }
+    if (this.boundPointerLockChange) {
+      document.removeEventListener('pointerlockchange', this.boundPointerLockChange);
+    }
+    if (this.boundWheel) {
+      this.canvas.removeEventListener('wheel', this.boundWheel, true);
+    }
+
+    this.boundKeyDown = null;
+    this.boundKeyUp = null;
+    this.boundMouseMove = null;
+    this.boundPointerLockChange = null;
+    this.boundWheel = null;
+  }
+
+  /**
    * Keyboard-Event-Listener registrieren.
    */
   private setupKeyboard(): void {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const self = this;
-    window.addEventListener('keydown', (e: KeyboardEvent) => {
-      // Verhindere Standardverhalten für Spieltasten (Scrollen etc.)
+    this.boundKeyDown = (e: KeyboardEvent) => {
       if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'KeyQ', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) {
         e.preventDefault();
       }
       if (e.code === 'Tab') {
-        self.tabPressedOnce = true;
+        this.tabPressedOnce = true;
       }
-      self.keysPressed.add(e.code);
-    }, true); // capture = true
+      this.keysPressed.add(e.code);
+    };
+    window.addEventListener('keydown', this.boundKeyDown, true);
 
-    window.addEventListener('keyup', (e: KeyboardEvent) => {
-      self.keysPressed.delete(e.code);
-    }, true); // capture = true
+    this.boundKeyUp = (e: KeyboardEvent) => {
+      this.keysPressed.delete(e.code);
+    };
+    window.addEventListener('keyup', this.boundKeyUp, true);
   }
 
   /**
    * Wheel-Event-Listener für Weapon-Switching.
    */
   private setupWheel(): void {
-    this.canvas.addEventListener('wheel', (e: WheelEvent) => {
+    this.boundWheel = (e: WheelEvent) => {
       if (!this.isPointerLocked) return;
       e.preventDefault();
       if (e.deltaY > 0) {
@@ -71,7 +111,8 @@ export class InputHandler {
       } else if (e.deltaY < 0) {
         this.wheelUpFlag = Math.min(this.wheelUpFlag + 1, 1);
       }
-    }, { passive: false, capture: true });
+    };
+    this.canvas.addEventListener('wheel', this.boundWheel, { passive: false, capture: true });
   }
 
   /**
@@ -114,22 +155,23 @@ export class InputHandler {
    * Mouse-Event-Listener für Pointer-Lock-Bewegung.
    */
   private setupMouse(): void {
-    document.addEventListener('mousemove', (e: MouseEvent) => {
+    this.boundMouseMove = (e: MouseEvent) => {
       if (this.isPointerLocked) {
-        // Nur X-Bewegung für Yaw (Horizontal-Rotation)
         this.mouseDeltaX += e.movementX;
         this.mouseDeltaY += e.movementY;
       }
-    });
+    };
+    document.addEventListener('mousemove', this.boundMouseMove);
   }
 
   /**
    * Pointer-Lock-Status-Tracking.
    */
   private setupPointerLock(): void {
-    document.addEventListener('pointerlockchange', () => {
+    this.boundPointerLockChange = () => {
       this.isPointerLocked = document.pointerLockElement === this.canvas;
-    });
+    };
+    document.addEventListener('pointerlockchange', this.boundPointerLockChange);
   }
 
   /**
