@@ -40,3 +40,6 @@ TASK[0-9]*_*.md
 TASK[0-9]*_*.txt
 FIX_PLAN.md
 IMPLEMENTATION_REPORT*.md
+.harness/workspace/
+.harness/offloads/
+.harness/threads/

@@ -3,7 +3,7 @@ import { MAP_WIDTH, MAP_HEIGHT, worldState, TILE, InteractionResult } from './wo
 import { ZBuffer } from './zbuffer';
 import { InputHandler, pointerLockSupported } from '../player/input';
 import { TextureManager, Texture } from './textures';
-import { Sprite, SpriteType, LatcherState } from './sprite';
+import { Sprite, SpriteType } from './sprite';
 import { updateEnemyAI, broadcastGunshot, type AIContext } from './enemy-ai';
 import { handlePlayerShoot, updateRockets, updateBioProjectiles, type CombatContext } from './combat';
 import {
@@ -31,6 +31,7 @@ import { WeaponInventory, WeaponType, WEAPONS } from '../game/weapons';
 import { drawWeapon, type WeaponRendererContext } from './weapon-renderer';
 import { drawHUD, type HUDContext } from './hud-renderer';
 import { castRays, drawFloorAndCeiling, type RaycasterContext } from './raycaster';
+import { renderSprites, type SpriteRendererContext } from './sprite-renderer';
 import { RocketProjectile } from './rocket-projectile';
 import { BioProjectile } from './bio-projectile';
 import { BloodParticle } from './blood-particle';
@@ -41,11 +42,8 @@ import { Level, BOSS_STAGE } from './level-gen';
 import {
   initializeSprites as initSpritesFlow,
   beginLevelTransition as beginTransitionFlow,
-  installLevel as installFlow,
   resetGameFlow,
   tickLoading,
-  LOAD_ANIM_MS,
-  STAGE_BANNER_DURATION,
   type LevelFlowContext,
   type LevelFlowState,
 } from './level-flow';
@@ -54,8 +52,6 @@ const SCREEN_WIDTH = 640;
 const SCREEN_HEIGHT = 480;
 const MOVE_SPEED = 3.0;          // Tiles pro Sekunde (Normal)
 const SPRINT_MULTIPLIER = 1.8;  // Sprint-Faktor
-const CORPSE_SCALE = 0.18;      // Corpse height as fraction of full sprite height
-
 export class Renderer {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
@@ -141,8 +137,6 @@ export class Renderer {
   private wasInteractPressedLastFrame: boolean = false;
 
   // Edge-Detection for TAB (reset after each poll)
-  private wasTabLastFrame: boolean = false;
-
   // Edge-Detection for melee key (KeyV)
   private meleeKeyWasDown = false;
 
@@ -426,6 +420,15 @@ export class Renderer {
     };
   }
 
+  private spriteRendererCtx(): SpriteRendererContext {
+    return {
+      ctx: this.ctx,
+      player: this.player,
+      sprites: this.sprites,
+      zBuffer: this.zBuffer,
+    };
+  }
+
   private levelFlowCtx(): LevelFlowContext {
     return {
       player: this.player,
@@ -435,255 +438,6 @@ export class Renderer {
       soundManager: this.soundManager,
       sprites: this.sprites,
     };
-  }
-
-  /**
-   * Sortiert Sprites nach Distanz zum Spieler (weitester zuerst = Painter's Algorithmus).
-   */
-  private sortSpritesByDistance(): void {
-    const px = this.player.x;
-    const py = this.player.y;
-
-    this.sprites.sort((a, b) => {
-      const distA = (a.x - px) * (a.x - px) + (a.y - py) * (a.y - py);
-      const distB = (b.x - px) * (b.x - px) + (b.y - py) * (b.y - py);
-      return distB - distA; // weitester zuerst
-    });
-  }
-
-  /**
-   * Rendert alle Sprites mit Transformations-Matrix, Projektion und Z-Buffer-Tiefentest.
-   */
-  private renderSprites(): void {
-    this.sortSpritesByDistance();
-
-    const dirX = this.player.dirX;
-    const dirY = this.player.dirY;
-    const planeX = this.player.planeX;
-    const planeY = this.player.planeY;
-    const px = this.player.x;
-    const py = this.player.y;
-
-    // Inverse Determinante der Kamera-Matrix
-    const invDet = 1.0 / (planeX * dirY - dirX * planeY);
-
-    for (const sprite of this.sprites) {
-      // Floating-Offset für Items (Schweben) bzw. subtiler Idle-Bob für Gegner.
-      let floatingOffset = sprite.getFloatingOffset();
-      if ((sprite.isEnemy) && sprite.isAlive) {
-        floatingOffset += Math.sin(sprite.floatingPhase) * 0.02;
-      }
-
-      // Death-Animation: Gegner sackt nach unten und wird kleiner
-      let deathProgress = 0;
-      if (sprite.isDying) {
-        deathProgress = 1.0 - (sprite.deathTimer / sprite.deathDuration); // 0 → 1
-        floatingOffset -= deathProgress * 0.3; // nach unten sacken
-      }
-
-      // Sprite-Position relativ zum Spieler (mit Floating-Offset)
-      const spriteX = sprite.x - px;
-      const spriteY = sprite.y + floatingOffset - py;
-
-      // Transformations-Matrix: ins Kamerakoordinatensystem
-      const transformX = invDet * (dirY * spriteX - dirX * spriteY);
-      const transformY = invDet * (-planeY * spriteX + planeX * spriteY);
-
-      // Nur rendern wenn Sprite vor der Kamera ist
-      if (transformY <= 0.1) continue;
-
-      // Bildschirm-X-Zentrum des Sprites
-      const spriteScreenX = Math.floor((SCREEN_WIDTH / 2) * (1 + transformX / transformY));
-
-      // Sprite-Höhe (basierend auf Distanz) → quadratisch
-      let spriteHeight = Math.abs(Math.floor(SCREEN_HEIGHT / transformY));
-      // Death-Animation: kleiner werden
-      if (sprite.isDying) {
-        spriteHeight = Math.floor(spriteHeight * (1.0 - deathProgress * 0.5));
-      }
-      const spriteWidth = spriteHeight;
-
-      // Vertical screen offset for Latchers in mid-leap — parabolic arc that
-      // peaks at leapProgress 0.5 and lands at 0 / 1. Lift in tiles scaled by
-      // inverse depth so the on-screen rise matches perspective.
-      let verticalScreenOffset = 0;
-      if (sprite.type === SpriteType.LATCHER && sprite.latcherState === LatcherState.LEAP) {
-        const arcHeight = Math.sin(sprite.leapProgress * Math.PI) * 0.6; // tiles
-        verticalScreenOffset = -arcHeight * (SCREEN_HEIGHT / transformY);
-      }
-
-      // Zeichen-Grenzen berechnen
-      let drawStartY = -spriteHeight / 2 + SCREEN_HEIGHT / 2 + verticalScreenOffset;
-      if (drawStartY < 0) drawStartY = 0;
-      let drawEndY = spriteHeight / 2 + SCREEN_HEIGHT / 2 + verticalScreenOffset;
-      if (drawEndY >= SCREEN_HEIGHT) drawEndY = SCREEN_HEIGHT - 1;
-
-      let drawStartX = -spriteWidth / 2 + spriteScreenX;
-      if (drawStartX < 0) drawStartX = 0;
-      let drawEndX = spriteWidth / 2 + spriteScreenX;
-      if (drawEndX >= SCREEN_WIDTH) drawEndX = SCREEN_WIDTH - 1;
-
-      // Distanz-basierte Helligkeit (gleich wie Wände)
-      const baseBrightness = Math.min(1.0, 2.0 / (1.0 + transformY * 0.3));
-
-      // Sprite-Textur wählen: Gegner mit angleViews → richtungsabhängig
-      let texture: Texture | null = sprite.texture;
-      if (
-        (sprite.isEnemy) &&
-        sprite.angleViews.length > 0 &&
-        !sprite.isDying &&
-        !sprite.isDead
-      ) {
-        const angleToCamera = Math.atan2(py - sprite.y, px - sprite.x);
-        const rel = angleToCamera - sprite.facingAngle;
-        const norm = ((rel % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-        const angleIdx = Math.floor((norm + Math.PI / 8) / (Math.PI / 4)) % 8;
-        const poseIdx = Math.min(sprite.currentFrame, sprite.angleViews.length - 1);
-        const views = sprite.angleViews[poseIdx];
-        if (views && views[angleIdx]) {
-          texture = views[angleIdx];
-        }
-      }
-
-      // Corpse rendering: flat, small, anchored to floor — no shadow, no flash, no death-tint
-      if ((sprite.isEnemy) && sprite.isDead && sprite.corpseTexture) {
-        texture = sprite.corpseTexture;
-        const fullSpriteHeight = Math.abs(Math.floor(SCREEN_HEIGHT / transformY));
-        spriteHeight = fullSpriteHeight * CORPSE_SCALE;
-        const spriteWidthCorpse = spriteHeight;
-        // Anchor corpse bottom to floor line (horizon + half full height)
-        const corpseDrawEndY = SCREEN_HEIGHT / 2 + Math.floor(fullSpriteHeight / 2);
-        const corpseDrawStartY = Math.max(0, Math.floor(corpseDrawEndY - spriteHeight));
-        const corpseDrawStartX = Math.floor(spriteScreenX - spriteWidthCorpse / 2);
-        const corpseDrawEndX = Math.floor(spriteScreenX + spriteWidthCorpse / 2);
-
-        // Skip shadow for corpses (body IS the shadow)
-        const baseCorpseBrightness = Math.min(1.0, 2.0 / (1.0 + transformY * 0.3));
-
-        const stripeWidth = corpseDrawEndX - corpseDrawStartX;
-        const corpseCenterX = (corpseDrawStartX + corpseDrawEndX) / 2;
-        const corpseHalfWidth = Math.max(1, (corpseDrawEndX - corpseDrawStartX) / 2);
-
-        for (let stripe = Math.max(0, corpseDrawStartX); stripe < Math.min(SCREEN_WIDTH, corpseDrawEndX); stripe++) {
-          if (transformY < this.zBuffer.get(stripe)) {
-            const texX = Math.floor(((stripe - corpseDrawStartX) * texture.width) / Math.max(1, stripeWidth));
-            const edgeDist = Math.abs(stripe - corpseCenterX) / corpseHalfWidth;
-            const volumeShade = 1.0 - 0.35 * edgeDist * edgeDist;
-            const brightness = baseCorpseBrightness * volumeShade;
-
-            for (let y = corpseDrawStartY; y < Math.min(SCREEN_HEIGHT - 1, corpseDrawEndY); y++) {
-              const texY = Math.floor(((y - corpseDrawStartY) * texture.height) / Math.max(1, corpseDrawEndY - corpseDrawStartY));
-              const srcIdx = (texY * texture.width + texX) * 4;
-              const srcData = texture.data.data;
-              const alpha = srcData[srcIdx + 3];
-              if (alpha > 0) {
-                const r = Math.min(255, Math.floor(srcData[srcIdx] * brightness));
-                const g = Math.min(255, Math.floor(srcData[srcIdx + 1] * brightness));
-                const b = Math.min(255, Math.floor(srcData[srcIdx + 2] * brightness));
-                this.ctx.fillStyle = `rgba(${r},${g},${b},${alpha / 255})`;
-                this.ctx.fillRect(stripe, y, 1, 1);
-              }
-            }
-          }
-        }
-        continue; // skip rest of per-sprite rendering for corpses
-      }
-
-      // Boden-Schatten: flache Ellipse am Sprite-Fuß (z-buffer-aware)
-      if (!sprite.isDying || deathProgress < 0.5) {
-        const shadowCenterY = SCREEN_HEIGHT / 2 + spriteHeight / 2;
-        const shadowRX = Math.max(2, spriteWidth * 0.32);
-        const shadowRY = Math.max(1, spriteHeight * 0.06);
-        const shadowAlpha = 0.5 * baseBrightness;
-        this.ctx.fillStyle = `rgba(0,0,0,${shadowAlpha})`;
-        const sxStart = Math.floor(spriteScreenX - shadowRX);
-        const sxEnd = Math.ceil(spriteScreenX + shadowRX);
-        for (let sx = sxStart; sx <= sxEnd; sx++) {
-          if (sx < 0 || sx >= SCREEN_WIDTH) continue;
-          if (transformY >= this.zBuffer.get(sx)) continue;
-          const dxNorm = (sx - spriteScreenX) / shadowRX;
-          if (dxNorm < -1 || dxNorm > 1) continue;
-          const halfH = shadowRY * Math.sqrt(Math.max(0, 1 - dxNorm * dxNorm));
-          const y0 = Math.floor(shadowCenterY - halfH);
-          const y1 = Math.floor(shadowCenterY + halfH);
-          const yClamped0 = Math.max(0, y0);
-          const yClamped1 = Math.min(SCREEN_HEIGHT - 1, y1);
-          if (yClamped1 >= yClamped0) {
-            this.ctx.fillRect(sx, yClamped0, 1, yClamped1 - yClamped0 + 1);
-          }
-        }
-      }
-
-      // Volumen-Shading-Vorab: Mitte und Halbweite für die per-Spalten-Vignette
-      const spriteCenterX = (drawStartX + drawEndX) / 2;
-      const halfSpriteWidth = Math.max(1, (drawEndX - drawStartX) / 2);
-
-      // Von rechts nach links zeichnen (Z-Buffer-Tiefentest)
-      const stripeWidth = drawEndX - drawStartX;
-      for (let stripe = Math.floor(drawStartX); stripe < drawEndX; stripe++) {
-        // Nur zeichnen wenn Sprite näher als die Wand in dieser Spalte
-        if (transformY < this.zBuffer.get(stripe)) {
-          const texX = Math.floor(((stripe - drawStartX) * texture!.width) / stripeWidth);
-
-          // Volumen-Shading: Spalten-Distanz vom Sprite-Zentrum (0 = Mitte, 1 = Rand)
-          const edgeDist = Math.abs(stripe - spriteCenterX) / halfSpriteWidth;
-          const volumeShade = 1.0 - 0.35 * edgeDist * edgeDist;
-          const brightness = baseBrightness * volumeShade;
-
-          for (let y = Math.floor(drawStartY); y < drawEndY; y++) {
-            const texY = Math.floor(((y - drawStartY) * texture!.height) / (drawEndY - drawStartY));
-
-            const srcIdx = (texY * texture!.width + texX) * 4;
-            const srcData = texture!.data.data;
-
-            // Alpha-Check: transparentes Sprite unterstützen
-            const alpha = srcData[srcIdx + 3];
-            if (alpha > 0) {
-              let r = srcData[srcIdx] * brightness;
-              let g = srcData[srcIdx + 1] * brightness;
-              let b = srcData[srcIdx + 2] * brightness;
-
-              // Hit-Flash: pro Gegner-Klasse eingefärbt (Cyan für Husk, Bio-Grün
-              // für Spitter, Orange für Boss). Latcher fällt in den Fallback.
-              if (sprite.hitFlashTimer > 0) {
-                if (sprite.type === SpriteType.SHOOTER) {
-                  // Spitter: Bio-Grün (SPITTER_BIO_HOT-Richtung)
-                  r = Math.min(255, r + 120);
-                  g = Math.min(255, g + 200);
-                  b = Math.min(255, b + 60);
-                } else if (sprite.type === SpriteType.ENEMY) {
-                  // Husk: Cyan (HUSK_EYE_HOT-Richtung)
-                  r = Math.min(255, r + 50);
-                  g = Math.min(255, g + 180);
-                  b = Math.min(255, b + 220);
-                } else if (sprite.type === SpriteType.BOSS) {
-                  // Boss: Orange — reads as a big, dangerous target.
-                  r = Math.min(255, r + 200);
-                  g = Math.min(255, g + 120);
-                  b = Math.min(255, b + 30);
-                } else {
-                  // Fallback (Latcher etc.)
-                  r = Math.min(255, r + 180);
-                  g = Math.min(255, g + 120);
-                  b = Math.min(255, b + 80);
-                }
-              }
-
-              // Death-Animation: dunkler + rot + ausfaden
-              if (sprite.isDying) {
-                const fade = 1.0 - deathProgress * 0.6;
-                r = r * fade + 80 * deathProgress; // rot-Tint
-                g = g * fade * 0.4;
-                b = b * fade * 0.3;
-              }
-
-              this.ctx.fillStyle = `rgba(${Math.min(255, Math.floor(r))},${Math.min(255, Math.floor(g))},${Math.min(255, Math.floor(b))},${alpha / 255})`;
-              this.ctx.fillRect(stripe, y, 1, 1);
-            }
-          }
-        }
-      }
-    }
   }
 
   /**
@@ -997,13 +751,6 @@ export class Renderer {
     }
   }
 
-  /**
-   * Zeichnet eine einzelne Textur-Spalte auf den Canvas.
-   * 
-   * @param screenX Bildschirmspalte
-   * @param drawStart Oberer Rand der Wand
-   * @param drawEnd Unterer Rand der Wand
-   * @param wallLineHeight Urspruengliche projizierte Wandhoehe vor Screen-Clipping
   public start(): void {
     this.lastTime = performance.now();
     this.accumulator = 0;
@@ -1078,7 +825,7 @@ export class Renderer {
       } else {
         drawFloorAndCeiling(this.raycasterCtx());
         castRays(this.raycasterCtx());
-        this.renderSprites();
+        renderSprites(this.spriteRendererCtx());
         const effectsCtx = this.effectsCtx();
         renderBloodParticles(effectsCtx);
         renderBioProjectiles(effectsCtx);
